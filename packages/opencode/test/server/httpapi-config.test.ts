@@ -107,4 +107,53 @@ describe("config HttpApi", () => {
       })
     }),
   )
+
+  it.live(
+    "replaces provider models and headers instead of merging them into the previous write",
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirEffect({ config: { formatter: false, lsp: false } })
+
+      const patch = (provider: unknown) =>
+        Effect.gen(function* () {
+          const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
+          const response = yield* Effect.promise(() =>
+            Promise.resolve(
+              app().request("/config", {
+                method: "PATCH",
+                headers: {
+                  "content-type": "application/json",
+                  "x-opencode-directory": tmp.path,
+                },
+                body: JSON.stringify({ formatter: false, lsp: false, provider }),
+              }),
+            ),
+          )
+          expect(response.status).toBe(200)
+          yield* Fiber.join(disposed)
+        })
+
+      yield* patch({
+        custom: {
+          npm: "@ai-sdk/openai-compatible",
+          name: "Custom",
+          options: { baseURL: "https://api.example.com", headers: { "X-Old": "old" } },
+          models: { "model-a": { name: "Model A" }, "model-b": { name: "Model B" } },
+        },
+      })
+
+      yield* patch({
+        custom: {
+          npm: "@ai-sdk/openai-compatible",
+          name: "Custom",
+          options: { baseURL: "https://api.example.com/v2", headers: { "X-New": "new" } },
+          models: { "model-a": { name: "Model A" } },
+        },
+      })
+
+      const written = yield* Effect.promise(() => Bun.file(path.join(tmp.path, "config.json")).json())
+      expect(Object.keys(written.provider.custom.models)).toEqual(["model-a"])
+      expect(written.provider.custom.options.headers).toEqual({ "X-New": "new" })
+      expect(written.provider.custom.options.baseURL).toBe("https://api.example.com/v2")
+    }),
+  )
 })

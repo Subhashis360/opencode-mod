@@ -51,6 +51,33 @@ function mergeConfigConcatArrays(target: Info, source: Info): Info {
   return merged
 }
 
+// A provider's `models` and `options.headers` are keyed collections rather than partial
+// patches: a client that sends them is describing the whole set. Deep merging them would
+// make removing a single model or header impossible, so an explicitly sent collection
+// replaces the stored one instead of being merged into it.
+function replaceProviderCollections(merged: unknown, patch: Info) {
+  if (!patch.provider || !isRecord(merged) || !isRecord(merged.provider)) return merged
+  const providers = merged.provider
+  return {
+    ...merged,
+    provider: Object.fromEntries(
+      Object.entries(providers).map(([id, entry]) => {
+        const override = patch.provider?.[id]
+        if (!override || !isRecord(entry)) return [id, entry]
+        const headers = override.options?.headers
+        return [
+          id,
+          {
+            ...entry,
+            ...(override.models ? { models: override.models } : {}),
+            ...(headers && isRecord(entry.options) ? { options: { ...entry.options, headers } } : {}),
+          },
+        ]
+      }),
+    ),
+  }
+}
+
 function normalizeLoadedConfig(data: unknown) {
   if (!isRecord(data)) return data
   const copy = { ...data }
@@ -641,11 +668,10 @@ const layer = Layer.effect(
       const existing = yield* loadFile(file)
       const text = yield* readConfigFile(file)
       const original = text ? ConfigParse.jsonc(text, file) : writable(existing)
+      const patch = writable(config)
+      const merged = mergeDeep(isRecord(original) ? original : writable(existing), patch)
       yield* fs
-        .writeFileString(
-          file,
-          JSON.stringify(mergeDeep(isRecord(original) ? original : writable(existing), writable(config)), null, 2),
-        )
+        .writeFileString(file, JSON.stringify(replaceProviderCollections(merged, patch), null, 2))
         .pipe(Effect.orDie)
     })
 
