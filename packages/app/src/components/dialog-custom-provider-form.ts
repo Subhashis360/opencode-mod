@@ -46,6 +46,7 @@ type ValidateArgs = {
   t: Translator
   disabledProviders: string[]
   existingProviderIDs: Set<string>
+  editingProviderID?: string
 }
 
 export function validateCustomProvider(input: ValidateArgs) {
@@ -71,9 +72,10 @@ export function validateCustomProvider(input: ValidateArgs) {
       : undefined
 
   const disabled = input.disabledProviders.includes(providerID)
+  const editing = providerID === input.editingProviderID
   const existsError = idError
     ? undefined
-    : input.existingProviderIDs.has(providerID) && !disabled
+    : input.existingProviderIDs.has(providerID) && !disabled && !editing
       ? input.t("provider.custom.error.providerID.exists")
       : undefined
 
@@ -156,3 +158,37 @@ const nextRow = () => `row-${row++}`
 
 export const modelRow = (): ModelRow => ({ row: nextRow(), id: "", name: "", err: {} })
 export const headerRow = (): HeaderRow => ({ row: nextRow(), key: "", value: "", err: {} })
+
+export type ProviderConfig = {
+  name?: string
+  env?: string[]
+  options?: {
+    baseURL?: string
+    headers?: Record<string, string>
+  }
+  models?: Record<string, { name?: string }>
+}
+
+export function formStateFromConfig(providerID: string, config: ProviderConfig): FormState {
+  const models = Object.entries(config.models ?? {}).map(([id, model]) => ({
+    ...modelRow(),
+    id,
+    name: model.name ?? "",
+  }))
+  const headers = Object.entries(config.options?.headers ?? {}).map(([key, value]) => ({
+    ...headerRow(),
+    key,
+    value,
+  }))
+  return {
+    providerID,
+    name: config.name ?? "",
+    baseURL: config.options?.baseURL ?? "",
+    // Stored keys are write-only, so an env reference is all we can restore. A blank
+    // field on save keeps whatever key is already stored for the provider.
+    apiKey: config.env?.[0] ? `{env:${config.env[0]}}` : "",
+    models: models.length ? models : [modelRow()],
+    headers: headers.length ? headers : [headerRow()],
+    err: {},
+  }
+}

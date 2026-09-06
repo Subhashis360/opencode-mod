@@ -87,6 +87,15 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
   const canDisconnect = (item: ProviderItem) =>
     source(item) !== "env" && (protocol() === "v1" || !isConfigCustom(item.id))
 
+  // Only providers this form authored can be round-tripped back into it.
+  const canEdit = (item: ProviderItem) => protocol() === "v1" && isConfigCustom(item.id)
+
+  const edit = (providerID: string) => {
+    const config = serverSync().data.config.provider?.[providerID]
+    if (!config) return
+    void dialog.show(() => <DialogCustomProvider onBack={() => dialog.close()} provider={{ id: providerID, config }} />)
+  }
+
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
 
   const isConfigCustom = (providerID: string) => {
@@ -182,9 +191,16 @@ const SettingsProvidersContent: Component<{ onBack?: () => void }> = (props) => 
                         </span>
                       }
                     >
-                      <Button size="large" variant="ghost" onClick={() => void disconnect(item.id, item.name)}>
-                        {language.t("common.disconnect")}
-                      </Button>
+                      <div class="flex items-center gap-1">
+                        <Show when={canEdit(item)}>
+                          <Button size="large" variant="ghost" onClick={() => edit(item.id)}>
+                            {language.t("common.edit")}
+                          </Button>
+                        </Show>
+                        <Button size="large" variant="ghost" onClick={() => void disconnect(item.id, item.name)}>
+                          {language.t("common.disconnect")}
+                        </Button>
+                      </div>
                     </Show>
                   </div>
                 )}

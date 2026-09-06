@@ -286,6 +286,12 @@
   color: var(--v2-text-text-muted);
 }
 
+.settings-v2-provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .settings-v2-provider-env-hint {
   padding-inline-end: 12px;
   font-size: 13px;

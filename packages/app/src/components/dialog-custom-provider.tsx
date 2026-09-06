@@ -12,10 +12,18 @@ import { ExternalLink } from "@/components/external-link"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
-import { type FormState, headerRow, modelRow, validateCustomProvider } from "./dialog-custom-provider-form"
+import {
+  type FormState,
+  type ProviderConfig,
+  formStateFromConfig,
+  headerRow,
+  modelRow,
+  validateCustomProvider,
+} from "./dialog-custom-provider-form"
 
 type Props = {
   onBack: () => void
+  provider?: { id: string; config: ProviderConfig }
 }
 
 export function DialogCustomProvider(props: Props) {
@@ -35,26 +43,32 @@ export function DialogCustomProvider(props: Props) {
       }
       transition
     >
-      <CustomProviderForm />
+      <CustomProviderForm provider={props.provider} />
     </Dialog>
   )
 }
 
-export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
+export function CustomProviderForm(
+  props: { autofocus?: boolean; provider?: { id: string; config: ProviderConfig } } = {},
+) {
   const dialog = useDialog()
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
   const language = useLanguage()
 
-  const [form, setForm] = createStore<FormState>({
-    providerID: "",
-    name: "",
-    baseURL: "",
-    apiKey: "",
-    models: [modelRow()],
-    headers: [headerRow()],
-    err: {},
-  })
+  const [form, setForm] = createStore<FormState>(
+    props.provider
+      ? formStateFromConfig(props.provider.id, props.provider.config)
+      : {
+          providerID: "",
+          name: "",
+          baseURL: "",
+          apiKey: "",
+          models: [modelRow()],
+          headers: [headerRow()],
+          err: {},
+        },
+  )
 
   const addModel = () => {
     setForm(
@@ -120,6 +134,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       t: language.t,
       disabledProviders: serverSync().data.config.disabled_providers ?? [],
       existingProviderIDs: new Set(serverSync().data.provider.all.keys()),
+      editingProviderID: props.provider?.id,
     })
     batch(() => {
       setForm("err", output.err)
@@ -145,8 +160,13 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
         })
       }
 
+      // The config patch is a deep merge, so an env reference the user cleared has to be
+      // overwritten with an empty list instead of simply being left out of the payload.
+      const config =
+        props.provider?.config.env?.length && !result.config.env ? { ...result.config, env: [] } : result.config
+
       await serverSync().updateConfig({
-        provider: { [result.providerID]: result.config },
+        provider: { [result.providerID]: config },
         disabled_providers: nextDisabled,
       })
       return result
@@ -193,7 +213,8 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
 
         <div class="flex flex-col gap-4">
           <TextField
-            autofocus={props.autofocus ?? true}
+            autofocus={(props.autofocus ?? true) && !props.provider}
+            disabled={!!props.provider}
             label={language.t("provider.custom.field.providerID.label")}
             placeholder={language.t("provider.custom.field.providerID.placeholder")}
             description={language.t("provider.custom.field.providerID.description")}
@@ -203,6 +224,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
             error={form.err.providerID}
           />
           <TextField
+            autofocus={(props.autofocus ?? true) && !!props.provider}
             label={language.t("provider.custom.field.name.label")}
             placeholder={language.t("provider.custom.field.name.placeholder")}
             value={form.name}
@@ -322,7 +344,11 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
           variant="primary"
           disabled={saveMutation.isPending}
         >
-          {saveMutation.isPending ? language.t("common.saving") : language.t("common.submit")}
+          {saveMutation.isPending
+            ? language.t("common.saving")
+            : props.provider
+              ? language.t("common.save")
+              : language.t("common.submit")}
         </Button>
       </form>
     </div>
