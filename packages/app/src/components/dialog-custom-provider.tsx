@@ -160,15 +160,27 @@ export function CustomProviderForm(
         })
       }
 
-      // The config patch is a deep merge, so an env reference the user cleared has to be
-      // overwritten with an empty list instead of simply being left out of the payload.
-      const config =
-        props.provider?.config.env?.length && !result.config.env ? { ...result.config, env: [] } : result.config
-
       await serverSync().updateConfig({
-        provider: { [result.providerID]: config },
+        provider: { [result.providerID]: result.config },
         disabled_providers: nextDisabled,
       })
+
+      // The config patch is a deep merge, so anything dropped in the form has to be deleted
+      // explicitly or the stored copy would survive.
+      const before = props.provider?.config
+      if (before) {
+        const base = ["provider", result.providerID]
+        const removed = [
+          ...Object.keys(before.models ?? {})
+            .filter((id) => !(id in result.config.models))
+            .map((id) => [...base, "models", id]),
+          ...Object.keys(before.options?.headers ?? {})
+            .filter((key) => !(key in (result.config.options.headers ?? {})))
+            .map((key) => [...base, "options", "headers", key]),
+          ...(before.env?.length && !result.config.env ? [[...base, "env"]] : []),
+        ]
+        for (const path of removed) await serverSync().removeConfig(path)
+      }
       return result
     },
     onSuccess: (result) => {

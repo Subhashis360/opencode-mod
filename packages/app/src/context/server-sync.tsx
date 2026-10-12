@@ -657,17 +657,26 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     },
   }
 
+  const refreshAfterConfigChange = () => {
+    bootstrap.refetch()
+    // Invalidate all provider queries so newly configured custom providers
+    // appear immediately in the available provider list across all directories.
+    queryClient.invalidateQueries({ queryKey: [serverSDK.scope, null, "providers"] })
+    queryClient.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === serverSDK.scope && query.queryKey[2] === "providers",
+    })
+  }
+
   const updateConfigMutation = useMutation(() => ({
     mutationFn: (config: Config) => serverSDK.client.global.config.update({ config }),
-    onSuccess: () => {
-      bootstrap.refetch()
-      // Invalidate all provider queries so newly configured custom providers
-      // appear immediately in the available provider list across all directories.
-      queryClient.invalidateQueries({ queryKey: [serverSDK.scope, null, "providers"] })
-      queryClient.invalidateQueries({
-        predicate: (query) => query.queryKey[0] === serverSDK.scope && query.queryKey[2] === "providers",
-      })
-    },
+    onSuccess: refreshAfterConfigChange,
+  }))
+
+  // Deletes one entry (agent, MCP server, command, or provider key) from the global config,
+  // which a merge-based update cannot do.
+  const removeConfigMutation = useMutation(() => ({
+    mutationFn: (path: string[]) => serverSDK.client.global.config.remove({ path }),
+    onSuccess: refreshAfterConfigChange,
   }))
 
   return {
@@ -686,6 +695,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     refreshProviders,
     // bootstrap,
     updateConfig: updateConfigMutation.mutateAsync,
+    removeConfig: removeConfigMutation.mutateAsync,
     project: projectApi,
     session,
     homeSessions,
