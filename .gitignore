@@ -26,6 +26,12 @@ target
 .scripts
 .direnv/
 
+# OpenCode Mod: local secrets and machine-specific files that must never be pushed
+githubpattoken.txt
+*token*.txt
+*.pat
+.claude/
+
 # Local dev files
 opencode-dev
 UPCOMING_CHANGELOG.md
