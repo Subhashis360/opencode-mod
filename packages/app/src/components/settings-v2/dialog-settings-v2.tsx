@@ -10,6 +10,10 @@ import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
+import { SettingsAgentsV2 } from "./mod/agents"
+import { SettingsPermissionsV2 } from "./mod/permissions"
+import { SettingsMcpV2 } from "./mod/mcp"
+import { SettingsCommandsV2 } from "./mod/commands"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLayout } from "@/context/layout"
 import { useTabs } from "@/context/tabs"
@@ -85,6 +89,28 @@ export const DialogSettings: Component<{
                     </TabsV2.Trigger>
                   </div>
                 </div>
+
+                <div class="flex flex-col gap-1.5">
+                  <TabsV2.SectionTitle>{language.t("mod.section")}</TabsV2.SectionTitle>
+                  <div class="flex flex-col gap-1.5 w-full">
+                    <TabsV2.Trigger value="agents">
+                      <Icon name="subagent" />
+                      {language.t("mod.agents.title")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="permissions">
+                      <Icon name="shield" />
+                      {language.t("mod.permissions.title")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="mcp">
+                      <Icon name="mcp" />
+                      {language.t("mod.mcp.title")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="commands">
+                      <Icon name="console" />
+                      {language.t("mod.commands.title")}
+                    </TabsV2.Trigger>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="settings-v2-nav-footer">
@@ -107,6 +133,18 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="agents" class="settings-v2-panel">
+          <SettingsAgentsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="permissions" class="settings-v2-panel">
+          <SettingsPermissionsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="mcp" class="settings-v2-panel">
+          <SettingsMcpV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="commands" class="settings-v2-panel">
+          <SettingsCommandsV2 />
         </TabsV2.Content>
       </TabsV2>
     </Dialog>

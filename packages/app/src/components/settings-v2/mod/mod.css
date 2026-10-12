@@ -1,0 +1,204 @@
+@import "@opencode-ai/ui/v2/textarea-v2.css";
+@import "@opencode-ai/ui/v2/select-v2.css";
+@import "@opencode-ai/ui/v2/switch-v2.css";
+
+.mod-tab-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 720px;
+}
+
+.mod-tab-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mod-tab-description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--v2-text-text-muted);
+}
+
+.mod-tab-header-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.mod-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mod-template {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 220px;
+  max-width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 8px;
+  background: var(--v2-background-bg-layer-01);
+  color: var(--v2-text-text-base);
+  cursor: pointer;
+}
+
+.mod-template:hover,
+.mod-template:focus-visible {
+  border-color: var(--v2-border-border-focus);
+  outline: none;
+}
+
+.mod-template-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mod-template-description {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--v2-text-text-muted);
+}
+
+.mod-editor {
+  /* Keep the sticky tab header from covering the editor when it is scrolled into view. */
+  scroll-margin-top: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 10px;
+  background: var(--v2-background-bg-layer-01);
+}
+
+.mod-editor-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--v2-text-text-base);
+}
+
+.mod-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 639px) {
+  .mod-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.mod-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mod-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The v2 inputs default to a fixed width; in the editor they fill their column. */
+.mod-editor
+  .mod-field
+  > :is([data-component="text-input-v2"], [data-component="textarea-v2"], [data-component="select-v2-root"]),
+.mod-editor .mod-field [data-component="select-v2"] {
+  width: 100%;
+}
+
+.mod-field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--v2-text-text-base);
+}
+
+.mod-field-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--v2-text-text-faint);
+}
+
+.mod-field-error {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--v2-state-fg-danger);
+}
+
+.mod-field textarea {
+  min-height: 72px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.mod-tool-limits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.mod-tool-limit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--v2-text-text-base);
+}
+
+.mod-entry-meta {
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--v2-text-text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mod-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 639px) {
+  .mod-presets {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.mod-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--v2-border-border-base);
+  border-radius: 8px;
+  background: var(--v2-background-bg-layer-01);
+}
+
+.mod-preset-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--v2-text-text-base);
+}
+
+.mod-preset-description {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--v2-text-text-muted);
+}
