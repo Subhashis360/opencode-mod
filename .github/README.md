@@ -94,7 +94,7 @@ git fetch upstream
 git merge upstream/dev
 ```
 
-Resolve any conflicts, run the tests, and release. The mod's changes are kept in a small, separate set of files (listed below) so upstream merges stay easy, and syncing also picks up any new minimum version the free tier asks for.
+Resolve any conflicts, run the tests, and release. The mod does not ship upstream's GitHub workflows (they need OpenCode's own infrastructure, and some auto-close issues and pull requests), so when a merge reports a conflict on a file in `.github/workflows/`, keep it deleted with `git rm <file>`. The mod's changes are kept in a small, separate set of files (listed below) so upstream merges stay easy, and syncing also picks up any new minimum version the free tier asks for.
 
 | Area                  | Files                                                                                                                        |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
