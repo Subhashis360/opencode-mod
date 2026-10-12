@@ -118,7 +118,44 @@ const getBase = (appId: string): Configuration => ({
   },
 })
 
+// OPENCODE_MOD=1 packages "OpenCode Mod". Every identity that decides where it installs and
+// what it registers differs from the official app, so both can be installed side by side.
+const MOD_APP_ID = "ai.opencode.mod"
+const MOD_NAME = "OpenCode Mod"
+const MOD_REPO = { owner: "Subhashis360", repo: "opencode-mod" }
+
+function getModConfig(): Configuration {
+  const base = getBase(MOD_APP_ID)
+  return {
+    ...base,
+    appId: MOD_APP_ID,
+    productName: MOD_NAME,
+    artifactName: "opencode-mod-${os}-${arch}.${ext}",
+    extraMetadata: {
+      ...base.extraMetadata,
+      // The per-user install folder is derived from the package name; the official app
+      // uses @opencode-ai/desktop, so this keeps the mod out of its folder.
+      name: "opencode-mod",
+      ...(process.env.OPENCODE_MOD_VERSION ? { version: process.env.OPENCODE_MOD_VERSION } : {}),
+    },
+    protocols: { name: MOD_NAME, schemes: ["opencode-mod"] },
+    publish: { provider: "github", ...MOD_REPO, channel: "latest" },
+    nsis: {
+      ...base.nsis,
+      oneClick: false,
+      allowToChangeInstallationDirectory: true,
+      createDesktopShortcut: "always",
+      createStartMenuShortcut: true,
+      shortcutName: MOD_NAME,
+      uninstallDisplayName: MOD_NAME,
+    },
+    deb: { packageName: "opencode-mod" },
+    rpm: { packageName: "opencode-mod" },
+  }
+}
+
 function getConfig() {
+  if (process.env.OPENCODE_MOD === "1") return getModConfig()
   const appId = APP_IDS[channel]
   const base = getBase(appId)
 

@@ -20,7 +20,9 @@
     "package:mac": "electron-builder --mac --config electron-builder.config.ts",
     "package:win": "electron-builder --win --config electron-builder.config.ts",
     "package:linux": "electron-builder --linux --config electron-builder.config.ts",
-    "native:build": "bun install --cwd native"
+    "native:build": "bun install --cwd native",
+    "package:mod": "bun ./scripts/mod.ts",
+    "release:mod": "bun ./scripts/mod.ts --release"
   },
   "main": "./out/main/index.js",
   "dependencies": {

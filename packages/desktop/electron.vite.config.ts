@@ -35,6 +35,7 @@ export default defineConfig({
   main: {
     define: {
       "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
+      "import.meta.env.OPENCODE_MOD": JSON.stringify(process.env.OPENCODE_MOD === "1" ? "1" : ""),
     },
     build: {
       rollupOptions: {

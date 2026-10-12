@@ -3,7 +3,7 @@ import log from "electron-log/main.js"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { CHANNEL } from "./constants"
+import { CHANNEL, MOD } from "./constants"
 import { getStore } from "./store"
 
 const TAURI_MIGRATED_KEY = "tauriMigrated"
@@ -67,6 +67,8 @@ function migrateFile(datPath: string, filename: string) {
 }
 
 export function migrate() {
+  // The mod never shipped a Tauri build, and the prod ids belong to the official app.
+  if (MOD) return
   if (getStore().get(TAURI_MIGRATED_KEY)) {
     log.log("tauri migration: already done, skipping")
     return
