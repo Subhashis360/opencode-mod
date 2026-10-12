@@ -155,6 +155,7 @@ export interface Interface {
   readonly getConsoleState: () => Effect.Effect<ConsoleState>
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
+  readonly removeGlobal: (path: readonly string[]) => Effect.Effect<{ info: Info; changed: boolean }>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
@@ -705,12 +706,31 @@ const layer = Layer.effect(
       return { info: next, changed }
     })
 
+    // A merge-based update can only add or overwrite keys, so deleting an agent, MCP server,
+    // command or provider entry goes through here. Editing in place keeps JSONC comments.
+    const removeGlobal = Effect.fn("Config.removeGlobal")(function* (keyPath: readonly string[]) {
+      const file = globalConfigFile()
+      const before = (yield* readConfigFile(file)) ?? "{}"
+      const edits = modify(before, [...keyPath], undefined, {
+        formattingOptions: { insertSpaces: true, tabSize: 2 },
+      })
+      const updated = applyEdits(before, edits)
+      const next = yield* decodeConfig(ConfigParse.jsonc(updated, file), file)
+      const changed = updated !== before
+      if (changed) {
+        yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+        yield* invalidate()
+      }
+      return { info: next, changed }
+    })
+
     return Service.of({
       get,
       getGlobal,
       getConsoleState,
       update,
       updateGlobal,
+      removeGlobal,
       invalidate,
       directories,
       waitForDependencies,

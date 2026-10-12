@@ -11,7 +11,7 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalUpgradeInput } from "../groups/global"
+import { GlobalConfigRemoveInput, GlobalUpgradeInput } from "../groups/global"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -81,6 +81,14 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return result.info
     })
 
+    const configRemove = Effect.fn("GlobalHttpApi.configRemove")(function* (ctx: {
+      payload: typeof GlobalConfigRemoveInput.Type
+    }) {
+      const result = yield* config.removeGlobal(ctx.payload.path)
+      if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
+      return result.info
+    })
+
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {
       yield* disposeAllInstancesAndEmitGlobalDisposed()
       return true
@@ -120,6 +128,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handleRaw("event", event)
       .handle("configGet", configGet)
       .handle("configUpdate", configUpdate)
+      .handle("configRemove", configRemove)
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
   }),

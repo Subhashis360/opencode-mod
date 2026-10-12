@@ -7329,6 +7329,33 @@ export type GlobalConfigUpdateResponses = {
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
 
+export type GlobalConfigRemoveData = {
+  body?: {
+    path: Array<string>
+  }
+  path?: never
+  query?: never
+  url: "/global/config/remove"
+}
+
+export type GlobalConfigRemoveErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalConfigRemoveError = GlobalConfigRemoveErrors[keyof GlobalConfigRemoveErrors]
+
+export type GlobalConfigRemoveResponses = {
+  /**
+   * Global config after the removal
+   */
+  200: Config
+}
+
+export type GlobalConfigRemoveResponse = GlobalConfigRemoveResponses[keyof GlobalConfigRemoveResponses]
+
 export type GlobalDisposeData = {
   body?: never
   path?: never

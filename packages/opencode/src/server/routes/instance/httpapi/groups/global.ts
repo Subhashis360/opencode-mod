@@ -54,6 +54,20 @@ export const GlobalUpgradeInput = Schema.Struct({
   ),
 })
 
+// Keyed collections whose entries a client may delete. Patches can only add or overwrite keys.
+const REMOVABLE_CONFIG_ROOTS = ["agent", "mcp", "command", "provider", "permission"]
+
+export const GlobalConfigRemoveInput = Schema.Struct({
+  path: Schema.Array(Schema.String).check(
+    Schema.makeFilter((value) =>
+      // `permission` may be a single action string, so it can also be removed as a whole.
+      REMOVABLE_CONFIG_ROOTS.includes(value[0]) && value.length >= (value[0] === "permission" ? 1 : 2)
+        ? undefined
+        : `Expected a path into one of: ${REMOVABLE_CONFIG_ROOTS.join(", ")}`,
+    ),
+  ),
+})
+
 const GlobalUpgradeResult = Schema.Union([
   Schema.Struct({
     success: Schema.Literal(true),
@@ -69,6 +83,7 @@ export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
   config: "/global/config",
+  configRemove: "/global/config/remove",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
 } as const
@@ -112,6 +127,18 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.config.update",
           summary: "Update global configuration",
           description: "Update global OpenCode configuration settings and preferences.",
+        }),
+      ),
+      HttpApiEndpoint.post("configRemove", GlobalPaths.configRemove, {
+        payload: GlobalConfigRemoveInput,
+        success: described(ConfigV1.Info, "Global config after the removal"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.config.remove",
+          summary: "Remove global configuration entry",
+          description:
+            "Delete one agent, MCP server, command, provider or permission entry from the global configuration.",
         }),
       ),
       HttpApiEndpoint.post("dispose", GlobalPaths.dispose, {

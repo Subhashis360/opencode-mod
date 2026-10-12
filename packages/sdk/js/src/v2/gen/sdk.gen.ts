@@ -78,6 +78,8 @@ import type {
   FormatterStatusResponses,
   GlobalConfigGetErrors,
   GlobalConfigGetResponses,
+  GlobalConfigRemoveErrors,
+  GlobalConfigRemoveResponses,
   GlobalConfigUpdateErrors,
   GlobalConfigUpdateResponses,
   GlobalDisposeErrors,
@@ -1304,6 +1306,30 @@ export class Config extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ key: "config", map: "body" }] }])
     return (options?.client ?? this.client).patch<GlobalConfigUpdateResponses, GlobalConfigUpdateErrors, ThrowOnError>({
       url: "/global/config",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Remove global configuration entry
+   *
+   * Delete one agent, MCP server, command, provider or permission entry from the global configuration.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters?: {
+      path?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "path" }] }])
+    return (options?.client ?? this.client).post<GlobalConfigRemoveResponses, GlobalConfigRemoveErrors, ThrowOnError>({
+      url: "/global/config/remove",
       ...options,
       ...params,
       headers: {
