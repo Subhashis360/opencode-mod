@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 import { $ } from "bun"
 
-import { downloadCliToResources, resolveChannel } from "./utils"
+import { buildServerBundle, downloadCliToResources, resolveChannel } from "./utils"
 
 const channel = resolveChannel()
 await $`bun ./scripts/copy-icons.ts ${channel}`
 await $`bun ./scripts/copy-metainfo.ts ${channel}`
 
-await $`cd ../opencode && bun script/build-node.ts`
+await buildServerBundle()
 if (channel === "dev") await downloadCliToResources()
