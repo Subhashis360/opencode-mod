@@ -229,3 +229,42 @@
   font-size: 13px;
   color: var(--v2-text-text-base);
 }
+
+.mod-limit-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  text-align: right;
+}
+
+.mod-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mod-field-end {
+  justify-content: flex-end;
+}
+
+.mod-prompt-row {
+  border-bottom: 0.5px solid var(--v2-border-border-base);
+}
+
+.mod-prompt-row:last-child {
+  border-bottom: none;
+}
+
+.mod-prompt-row .settings-v2-provider-row {
+  border-bottom: none;
+}
+
+.mod-prompt-view {
+  width: 100%;
+  margin-bottom: 16px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
