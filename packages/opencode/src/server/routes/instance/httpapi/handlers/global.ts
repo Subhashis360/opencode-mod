@@ -8,6 +8,9 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Account } from "@/account/account"
 import { AccountID, OrgID, type Login } from "@/account/schema"
 import { errorMessage } from "@/util/error"
+import * as ModFreeTier from "@/mod/free-tier"
+import { BUILT_IN_PROMPTS, upstreamPrompts } from "@/mod/prompts"
+import { Database } from "@opencode-ai/core/database/database"
 import { randomUUID } from "node:crypto"
 import { Duration, Effect, Option, Queue } from "effect"
 import * as Stream from "effect/Stream"
@@ -76,6 +79,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const config = yield* Config.Service
     const installation = yield* Installation.Service
     const account = yield* Account.Service
+    const database = yield* Database.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -236,6 +240,25 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return true
     })
 
+    const modFreeTier = Effect.fn("GlobalHttpApi.modFreeTier")(function* () {
+      const [result, ip] = yield* Effect.all(
+        [
+          ModFreeTier.usage(Date.now()).pipe(Effect.provideService(Database.Service, database)),
+          Effect.promise(ModFreeTier.publicIp),
+        ],
+        { concurrency: 2 },
+      )
+      return { ...result, ip: ip.ip ?? null, ipError: ip.error ?? null }
+    })
+
+    const modPrompts = Effect.fn("GlobalHttpApi.modPrompts")(function* () {
+      return { prompts: BUILT_IN_PROMPTS.map((prompt) => ({ ...prompt })) }
+    })
+
+    const modPromptsUpstream = Effect.fn("GlobalHttpApi.modPromptsUpstream")(function* () {
+      return { prompts: yield* Effect.promise(upstreamPrompts) }
+    })
+
     return handlers
       .handle("health", health)
       .handleRaw("event", event)
@@ -249,5 +272,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("accountLoginPoll", accountLoginPoll)
       .handle("accountLogout", accountLogout)
       .handle("accountSwitch", accountSwitch)
+      .handle("modFreeTier", modFreeTier)
+      .handle("modPrompts", modPrompts)
+      .handle("modPromptsUpstream", modPromptsUpstream)
   }),
 )

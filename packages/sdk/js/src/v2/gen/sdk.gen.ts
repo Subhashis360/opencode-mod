@@ -98,6 +98,12 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalModFreeTierErrors,
+  GlobalModFreeTierResponses,
+  GlobalModPromptsErrors,
+  GlobalModPromptsResponses,
+  GlobalModPromptsUpstreamErrors,
+  GlobalModPromptsUpstreamResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1480,6 +1486,45 @@ export class Account extends HeyApiClient {
   }
 }
 
+export class Mod extends HeyApiClient {
+  /**
+   * Get free-tier usage
+   *
+   * Requests to OpenCode's free models from this machine over the last days, and the public IP the gateway's per-IP daily limit applies to.
+   */
+  public freeTier<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalModFreeTierResponses, GlobalModFreeTierErrors, ThrowOnError>({
+      url: "/global/mod/free-tier",
+      ...options,
+    })
+  }
+
+  /**
+   * List built-in system prompts
+   *
+   * The model system prompts bundled with this version and which models use each.
+   */
+  public prompts<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalModPromptsResponses, GlobalModPromptsErrors, ThrowOnError>({
+      url: "/global/mod/prompts",
+      ...options,
+    })
+  }
+
+  /**
+   * Get upstream system prompts
+   *
+   * The built-in system prompts as they are now on upstream OpenCode's dev branch.
+   */
+  public promptsUpstream<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GlobalModPromptsUpstreamResponses,
+      GlobalModPromptsUpstreamErrors,
+      ThrowOnError
+    >({ url: "/global/mod/prompts/upstream", ...options })
+  }
+}
+
 export class Global extends HeyApiClient {
   /**
    * Get health
@@ -1549,6 +1594,11 @@ export class Global extends HeyApiClient {
   private _account?: Account
   get account(): Account {
     return (this._account ??= new Account({ client: this.client }))
+  }
+
+  private _mod?: Mod
+  get mod(): Mod {
+    return (this._mod ??= new Mod({ client: this.client }))
   }
 }
 

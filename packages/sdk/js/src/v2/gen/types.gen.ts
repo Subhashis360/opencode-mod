@@ -2074,6 +2074,36 @@ export type GlobalAccountPollResult = {
   error?: string
 }
 
+export type ModFreeTier = {
+  now: number
+  dayStart: number
+  resetAt: number
+  ip: string
+  ipError: string
+  requests: Array<{
+    time: number
+    modelID: string
+    tokens: number
+    limited: boolean
+    failed: boolean
+  }>
+}
+
+export type ModPromptList = {
+  prompts: Array<{
+    id: string
+    title: string
+    usedBy: string
+    content: string
+  }>
+}
+
+export type ModUpstreamPrompts = {
+  prompts: {
+    [key: string]: string
+  }
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -7591,6 +7621,82 @@ export type GlobalAccountSwitchResponses = {
 }
 
 export type GlobalAccountSwitchResponse = GlobalAccountSwitchResponses[keyof GlobalAccountSwitchResponses]
+
+export type GlobalModFreeTierData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/mod/free-tier"
+}
+
+export type GlobalModFreeTierErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModFreeTierError = GlobalModFreeTierErrors[keyof GlobalModFreeTierErrors]
+
+export type GlobalModFreeTierResponses = {
+  /**
+   * Free-tier usage
+   */
+  200: ModFreeTier
+}
+
+export type GlobalModFreeTierResponse = GlobalModFreeTierResponses[keyof GlobalModFreeTierResponses]
+
+export type GlobalModPromptsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/mod/prompts"
+}
+
+export type GlobalModPromptsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModPromptsError = GlobalModPromptsErrors[keyof GlobalModPromptsErrors]
+
+export type GlobalModPromptsResponses = {
+  /**
+   * Built-in system prompts
+   */
+  200: ModPromptList
+}
+
+export type GlobalModPromptsResponse = GlobalModPromptsResponses[keyof GlobalModPromptsResponses]
+
+export type GlobalModPromptsUpstreamData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/mod/prompts/upstream"
+}
+
+export type GlobalModPromptsUpstreamErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModPromptsUpstreamError = GlobalModPromptsUpstreamErrors[keyof GlobalModPromptsUpstreamErrors]
+
+export type GlobalModPromptsUpstreamResponses = {
+  /**
+   * Upstream system prompts
+   */
+  200: ModUpstreamPrompts
+}
+
+export type GlobalModPromptsUpstreamResponse =
+  GlobalModPromptsUpstreamResponses[keyof GlobalModPromptsUpstreamResponses]
 
 export type EventSubscribeData = {
   body?: never

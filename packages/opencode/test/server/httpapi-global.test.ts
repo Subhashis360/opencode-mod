@@ -7,6 +7,7 @@ import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { Account } from "../../src/account/account"
+import { Database } from "@opencode-ai/core/database/database"
 import {
   AccountID,
   DeviceCode,
@@ -76,6 +77,9 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(Layer.mock(MoveSession.Service)({})),
   Layer.provide(accountMock),
+  // The routes these tests call never touch the database.
+  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+  Layer.provide(Layer.mock(Database.Service)({ db: {} as never })),
   Layer.provide(
     Layer.mock(Installation.Service)({
       method: () => Effect.succeed("npm"),
@@ -204,6 +208,17 @@ describe("global HttpApi", () => {
       expect(response.status).toBe(200)
       expect(used).toEqual([["acc-1", "org-1"]])
       expect(removed.length).toBe(removedBefore)
+    }),
+  )
+
+  it.live("lists the built-in system prompts", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(GlobalPaths.modPrompts).pipe(HttpClient.execute)
+
+      expect(response.status).toBe(200)
+      const body = (yield* response.json) as { prompts: { id: string; usedBy: string; content: string }[] }
+      expect(body.prompts.find((prompt) => prompt.id === "anthropic")?.usedBy).toBe("Claude models")
+      expect(body.prompts.every((prompt) => prompt.content.length > 0)).toBe(true)
     }),
   )
 })

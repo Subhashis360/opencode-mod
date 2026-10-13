@@ -130,6 +130,35 @@ export const GlobalAccountSwitchInput = Schema.Struct({
   }),
 })
 
+// OpenCode Mod: free-tier usage from local history plus the public IP the gateway limits by.
+const ModFreeTierRequest = Schema.Struct({
+  time: Schema.Finite,
+  modelID: Schema.String,
+  tokens: Schema.Finite,
+  limited: Schema.Boolean,
+  failed: Schema.Boolean,
+})
+
+const ModFreeTier = Schema.Struct({
+  now: Schema.Finite,
+  dayStart: Schema.Finite,
+  resetAt: Schema.Finite,
+  ip: Schema.NullOr(Schema.String),
+  ipError: Schema.NullOr(Schema.String),
+  requests: Schema.Array(ModFreeTierRequest),
+}).annotate({ identifier: "ModFreeTier" })
+
+// OpenCode Mod: the built-in model system prompts, and the same prompts on upstream's dev branch.
+const ModPromptList = Schema.Struct({
+  prompts: Schema.Array(
+    Schema.Struct({ id: Schema.String, title: Schema.String, usedBy: Schema.String, content: Schema.String }),
+  ),
+}).annotate({ identifier: "ModPromptList" })
+
+const ModUpstreamPrompts = Schema.Struct({
+  prompts: Schema.Record(Schema.String, Schema.String),
+}).annotate({ identifier: "ModUpstreamPrompts" })
+
 const GlobalUpgradeResult = Schema.Union([
   Schema.Struct({
     success: Schema.Literal(true),
@@ -153,6 +182,9 @@ export const GlobalPaths = {
   accountLoginPoll: "/global/account/login/poll",
   accountLogout: "/global/account/logout",
   accountSwitch: "/global/account/switch",
+  modFreeTier: "/global/mod/free-tier",
+  modPrompts: "/global/mod/prompts",
+  modPromptsUpstream: "/global/mod/prompts/upstream",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -279,6 +311,34 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.account.switch",
           summary: "Switch the active OpenCode account",
           description: "Make another signed-in account (and optionally one of its orgs) active without signing out.",
+        }),
+      ),
+      HttpApiEndpoint.get("modFreeTier", GlobalPaths.modFreeTier, {
+        success: described(ModFreeTier, "Free-tier usage"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.mod.freeTier",
+          summary: "Get free-tier usage",
+          description:
+            "Requests to OpenCode's free models from this machine over the last days, and the public IP the gateway's per-IP daily limit applies to.",
+        }),
+      ),
+      HttpApiEndpoint.get("modPrompts", GlobalPaths.modPrompts, {
+        success: described(ModPromptList, "Built-in system prompts"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.mod.prompts",
+          summary: "List built-in system prompts",
+          description: "The model system prompts bundled with this version and which models use each.",
+        }),
+      ),
+      HttpApiEndpoint.get("modPromptsUpstream", GlobalPaths.modPromptsUpstream, {
+        success: described(ModUpstreamPrompts, "Upstream system prompts"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.mod.promptsUpstream",
+          summary: "Get upstream system prompts",
+          description: "The built-in system prompts as they are now on upstream OpenCode's dev branch.",
         }),
       ),
     )
