@@ -14,6 +14,8 @@ import { SettingsAgentsV2 } from "./mod/agents"
 import { SettingsPermissionsV2 } from "./mod/permissions"
 import { SettingsMcpV2 } from "./mod/mcp"
 import { SettingsCommandsV2 } from "./mod/commands"
+import { SettingsAccountV2 } from "./mod/account"
+import { SettingsExperimentalV2 } from "./mod/experimental"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLayout } from "@/context/layout"
 import { useTabs } from "@/context/tabs"
@@ -93,6 +95,10 @@ export const DialogSettings: Component<{
                 <div class="flex flex-col gap-1.5">
                   <TabsV2.SectionTitle>{language.t("mod.section")}</TabsV2.SectionTitle>
                   <div class="flex flex-col gap-1.5 w-full">
+                    <TabsV2.Trigger value="account">
+                      <Icon name="glasses" />
+                      {language.t("mod.account.title")}
+                    </TabsV2.Trigger>
                     <TabsV2.Trigger value="agents">
                       <Icon name="subagent" />
                       {language.t("mod.agents.title")}
@@ -108,6 +114,10 @@ export const DialogSettings: Component<{
                     <TabsV2.Trigger value="commands">
                       <Icon name="console" />
                       {language.t("mod.commands.title")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="experimental">
+                      <Icon name="brain" />
+                      {language.t("mod.experimental.title")}
                     </TabsV2.Trigger>
                   </div>
                 </div>
@@ -134,6 +144,9 @@ export const DialogSettings: Component<{
         <TabsV2.Content value="models" class="settings-v2-panel">
           <SettingsModelsV2 />
         </TabsV2.Content>
+        <TabsV2.Content value="account" class="settings-v2-panel">
+          <SettingsAccountV2 />
+        </TabsV2.Content>
         <TabsV2.Content value="agents" class="settings-v2-panel">
           <SettingsAgentsV2 />
         </TabsV2.Content>
@@ -145,6 +158,9 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="commands" class="settings-v2-panel">
           <SettingsCommandsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="experimental" class="settings-v2-panel">
+          <SettingsExperimentalV2 />
         </TabsV2.Content>
       </TabsV2>
     </Dialog>

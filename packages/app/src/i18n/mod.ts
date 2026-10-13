@@ -121,4 +121,84 @@ export const dict = {
   "mod.commands.agent.default": "Current agent",
   "mod.commands.field.subtask": "Run as subtask",
   "mod.commands.field.subtask.hint": "Runs in a separate session so it does not fill your main context",
+
+  "mod.account.title": "OpenCode Account",
+  "mod.account.description":
+    "Sign in to your OpenCode account for Zen, Go and your Console orgs. You can stay signed in to several accounts and switch between them at any time.",
+  "mod.account.add": "Add account",
+  "mod.account.empty": "You are not signed in to an OpenCode account.",
+  "mod.account.active": "Active",
+  "mod.account.switch": "Switch",
+  "mod.account.signOut": "Sign out",
+  "mod.account.confirmSignOut": "Confirm sign out",
+  "mod.account.org": "Org",
+  "mod.account.signIn.title": "Sign in to OpenCode",
+  "mod.account.signIn.step":
+    "Open the sign-in page, check that it shows this code, and approve. This page updates on its own.",
+  "mod.account.signIn.open": "Open sign-in page",
+  "mod.account.signIn.copy": "Copy code",
+  "mod.account.signIn.copied": "Copied",
+  "mod.account.signIn.waiting": "Waiting for approval…",
+  "mod.account.signIn.starting": "Starting sign-in…",
+  "mod.account.toast.signedIn": "Signed in as {{email}}",
+  "mod.account.toast.signedOut": "Signed out of {{email}}",
+  "mod.account.toast.switched": "Now using {{email}}",
+  "mod.account.error.expired": "The sign-in code expired. Start again.",
+  "mod.account.error.denied": "Sign-in was declined.",
+  "mod.account.error.failed": "Sign-in failed: {{message}}",
+  "mod.account.error.unavailable": "This server does not support signing in from the app.",
+
+  "mod.experimental.title": "Experimental",
+  "mod.experimental.description":
+    "Turn on engine features that are still in testing. They can change or break, and apply after you restart OpenCode Mod.",
+  "mod.experimental.desktopOnly": "Experimental features can only be changed in the OpenCode Mod desktop app.",
+  "mod.experimental.restartNeeded": "Restart OpenCode Mod to apply your changes.",
+  "mod.experimental.restart": "Restart now",
+  "mod.experimental.section.tools": "Tools",
+  "mod.experimental.section.models": "Models and providers",
+  "mod.experimental.section.workspace": "Projects and workspace",
+  "mod.experimental.section.limits": "Limits",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_CODE_MODE": "Code mode",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_CODE_MODE.description":
+    "The model calls tools by writing short scripts that run in a confined interpreter, instead of one tool call at a time.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS": "Background subagents",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS.description":
+    "Subagents can keep working in the background while the main agent continues.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_LSP_TOOL": "LSP tool",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_LSP_TOOL.description":
+    "Gives agents a language-server tool for definitions, references and diagnostics.",
+  "mod.experimental.flag.OPENCODE_ENABLE_EXA": "Exa web search",
+  "mod.experimental.flag.OPENCODE_ENABLE_EXA.description": "Use Exa as the web search provider.",
+  "mod.experimental.flag.OPENCODE_ENABLE_PARALLEL": "Parallel web search",
+  "mod.experimental.flag.OPENCODE_ENABLE_PARALLEL.description":
+    "Use Parallel as the web search provider. Takes priority over Exa.",
+  "mod.experimental.flag.OPENCODE_ENABLE_EXPERIMENTAL_MODELS": "Alpha models",
+  "mod.experimental.flag.OPENCODE_ENABLE_EXPERIMENTAL_MODELS.description":
+    "Show models that providers mark as alpha, which are hidden by default.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_NATIVE_LLM": "Native LLM client",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_NATIVE_LLM.description":
+    "Use OpenCode's own client for OpenAI, Anthropic and OpenAI-compatible API keys; others keep using the AI SDK.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_WEBSOCKETS": "OpenAI WebSockets",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_WEBSOCKETS.description":
+    "Stream OpenAI (ChatGPT sign-in) responses over WebSockets.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_WORKSPACES": "Workspaces",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_WORKSPACES.description":
+    "Run sessions in separate workspaces for the same project.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_FILEWATCHER": "File watcher",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_FILEWATCHER.description":
+    "Notice edits made to project files outside OpenCode. By default only Git state is watched.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_ICON_DISCOVERY": "Project icon discovery",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_ICON_DISCOVERY.description":
+    "Find a project's favicon or logo and use it as its icon.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_OXFMT": "oxfmt formatter",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_OXFMT.description":
+    "Format JavaScript and TypeScript with oxfmt when the project uses it.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_LSP_TY": "ty for Python",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_LSP_TY.description": "Use Astral's ty as the Python language server.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS": "Shell command timeout (ms)",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS.description":
+    "How long a shell command may run before it is stopped. Leave empty for the default.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX": "Max output tokens",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX.description":
+    "Upper limit for tokens in one model reply. Leave empty for the default.",
 }

@@ -5,6 +5,8 @@ import type { Details } from "electron"
 import { getLogger } from "./logging"
 import { getUserShell, loadShellEnv } from "./shell-env"
 import { getStore } from "./store"
+import { MOD } from "./constants"
+import { readModFlags } from "./mod-flags"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
 
 export type HealthCheck = { wait: Promise<void> }
@@ -216,6 +218,8 @@ function createSidecarEnv(): Record<string, string> {
   )
   delete env.DEBUG
   if (process.platform === "linux") delete env.LD_PRELOAD
+  // Experimental engine switches chosen in Settings → Mod → Experimental.
+  if (MOD) Object.assign(env, readModFlags())
   return env
 }
 

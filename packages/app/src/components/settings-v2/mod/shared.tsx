@@ -89,7 +89,7 @@ export function ModField(props: { label: string; hint?: string; error?: string; 
 }
 
 // A delete button that asks for a second click before acting.
-export function DeleteButton(props: { onConfirm: () => void }) {
+export function DeleteButton(props: { onConfirm: () => void; label?: string; confirmLabel?: string }) {
   const language = useLanguage()
   const [armed, setArmed] = createSignal(false)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -108,7 +108,9 @@ export function DeleteButton(props: { onConfirm: () => void }) {
 
   return (
     <ButtonV2 size="normal" variant={armed() ? "danger" : "ghost-muted"} onClick={click}>
-      {armed() ? language.t("mod.action.confirmDelete") : language.t("common.delete")}
+      {armed()
+        ? (props.confirmLabel ?? language.t("mod.action.confirmDelete"))
+        : (props.label ?? language.t("common.delete"))}
     </ButtonV2>
   )
 }
