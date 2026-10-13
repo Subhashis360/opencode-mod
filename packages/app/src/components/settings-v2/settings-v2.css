@@ -733,3 +733,15 @@
   line-height: 1;
   color: var(--v2-state-fg-danger);
 }
+
+/* OpenCode Mod: Settings stays open until this button closes it. */
+.settings-v2-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+}
+
+[data-component="dialog-v2"][data-variant="settings"] [data-slot="dialog-content"] {
+  position: relative;
+}

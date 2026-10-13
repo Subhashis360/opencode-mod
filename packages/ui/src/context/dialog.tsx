@@ -18,6 +18,14 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 
 type DialogElement = () => JSX.Element
 
+// Lets a dialog keep itself open: a persistent dialog ignores backdrop clicks, outside clicks and
+// Escape (which then reaches the menus and editors inside it) and closes only through close().
+const InstanceContext = createContext<{ setPersistent: (persistent: boolean) => void }>()
+
+export function usePersistentDialog() {
+  useContext(InstanceContext)?.setPersistent(true)
+}
+
 type Active = {
   id: string
   node: JSX.Element
@@ -25,6 +33,7 @@ type Active = {
   owner: Owner
   onClose?: () => void
   setClosing: (closing: boolean) => void
+  persistent: () => boolean
 }
 
 const Context = createContext<ReturnType<typeof init>>()
@@ -67,6 +76,7 @@ function init() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
+      if (stack().at(-1)?.persistent()) return
       close()
       event.preventDefault()
       event.stopPropagation()
@@ -80,18 +90,21 @@ function init() {
     const zIndex = 50 + layer * 10
     let dispose: (() => void) | undefined
     let setClosing: ((closing: boolean) => void) | undefined
+    let persistent: (() => boolean) | undefined
 
     const node = runWithOwner(owner, () =>
       createRoot((d: () => void) => {
         dispose = d
         const [closing, setClosingSignal] = createSignal(false)
         setClosing = setClosingSignal
+        const [isPersistent, setPersistent] = createSignal(false)
+        persistent = isPersistent
         return (
           <Kobalte
             modal={stack().at(-1)?.id === id}
             open={!closing()}
             onOpenChange={(open: boolean) => {
-              if (open || stack().at(-1)?.id !== id) return
+              if (open || isPersistent() || stack().at(-1)?.id !== id) return
               close(id)
             }}
           >
@@ -99,7 +112,9 @@ function init() {
               <Kobalte.Overlay
                 data-component="dialog-overlay"
                 style={{ "z-index": String(zIndex) }}
-                onClick={() => close(id)}
+                onClick={() => {
+                  if (!isPersistent()) close(id)
+                }}
               />
               <div
                 data-dialog-layer={layer}
@@ -113,7 +128,7 @@ function init() {
                   "pointer-events": "none",
                 }}
               >
-                {element()}
+                <InstanceContext.Provider value={{ setPersistent }}>{element()}</InstanceContext.Provider>
               </div>
             </Kobalte.Portal>
           </Kobalte>
@@ -121,9 +136,9 @@ function init() {
       }),
     )
 
-    if (!dispose || !setClosing) return
+    if (!dispose || !setClosing || !persistent) return
 
-    const active: Active = { id, node, dispose, owner, onClose, setClosing }
+    const active: Active = { id, node, dispose, owner, onClose, setClosing, persistent }
     setStack((items) => [...items, active])
   }
 

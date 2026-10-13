@@ -16,7 +16,10 @@ import { SettingsMcpV2 } from "./mod/mcp"
 import { SettingsCommandsV2 } from "./mod/commands"
 import { SettingsAccountV2 } from "./mod/account"
 import { SettingsExperimentalV2 } from "./mod/experimental"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { SettingsLimitsV2 } from "./mod/limits"
+import { SettingsPromptsV2 } from "./mod/prompts"
+import { useDialog, usePersistentDialog } from "@opencode-ai/ui/context/dialog"
+import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { useLayout } from "@/context/layout"
 import { useTabs } from "@/context/tabs"
 import { useServerSync } from "@/context/server-sync"
@@ -32,6 +35,9 @@ export const DialogSettings: Component<{
   const tabs = useTabs()
   const serverSync = useServerSync()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
+  // Settings holds forms; a stray click outside or an Escape meant for a menu must not discard them.
+  // It closes only from the close button.
+  usePersistentDialog()
   const directory = createMemo(() => {
     const route = layout.route()
     if (route.type === "dir-new-sesssion") return route.dir
@@ -49,6 +55,13 @@ export const DialogSettings: Component<{
 
   return (
     <Dialog size="x-large" variant="settings" class="settings-v2-dialog">
+      <IconButtonV2
+        class="settings-v2-close"
+        variant="ghost-muted"
+        icon={<Icon name="close" />}
+        aria-label={language.t("ui.common.close")}
+        onClick={() => dialog.close()}
+      />
       <TabsV2
         orientation="vertical"
         variant="settings"
@@ -99,9 +112,17 @@ export const DialogSettings: Component<{
                       <Icon name="glasses" />
                       {language.t("mod.account.title")}
                     </TabsV2.Trigger>
+                    <TabsV2.Trigger value="limits">
+                      <Icon name="status" />
+                      {language.t("mod.limits.title")}
+                    </TabsV2.Trigger>
                     <TabsV2.Trigger value="agents">
                       <Icon name="subagent" />
                       {language.t("mod.agents.title")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="prompts">
+                      <Icon name="prompt" />
+                      {language.t("mod.prompts.title")}
                     </TabsV2.Trigger>
                     <TabsV2.Trigger value="permissions">
                       <Icon name="shield" />
@@ -147,8 +168,14 @@ export const DialogSettings: Component<{
         <TabsV2.Content value="account" class="settings-v2-panel">
           <SettingsAccountV2 onOpenProviders={() => void startTransition(() => setTab("providers"))} />
         </TabsV2.Content>
+        <TabsV2.Content value="limits" class="settings-v2-panel">
+          <SettingsLimitsV2 />
+        </TabsV2.Content>
         <TabsV2.Content value="agents" class="settings-v2-panel">
           <SettingsAgentsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="prompts" class="settings-v2-panel">
+          <SettingsPromptsV2 />
         </TabsV2.Content>
         <TabsV2.Content value="permissions" class="settings-v2-panel">
           <SettingsPermissionsV2 />
