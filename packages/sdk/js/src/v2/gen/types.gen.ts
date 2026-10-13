@@ -2032,6 +2032,48 @@ export type Config = {
   }
 }
 
+export type GlobalAccountOrg = {
+  id: string
+  name: string
+}
+
+export type GlobalAccount = {
+  id: string
+  email: string
+  url: string
+  active: boolean
+  activeOrgID: string
+  orgs: Array<GlobalAccountOrg>
+}
+
+export type GlobalAccountList = {
+  accounts: Array<GlobalAccount>
+}
+
+export type EffectHttpApiErrorInternalServerError = {
+  _tag: "InternalServerError"
+}
+
+export type GlobalAccountLoginStart =
+  | {
+      success: true
+      id: string
+      verificationUrl: string
+      userCode: string
+      intervalSeconds: number
+      expiresInSeconds: number
+    }
+  | {
+      success: false
+      error: string
+    }
+
+export type GlobalAccountPollResult = {
+  status: "pending" | "slow_down" | "success" | "expired" | "denied" | "error"
+  email?: string
+  error?: string
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -2137,10 +2179,6 @@ export type ConsoleState = {
   consoleManagedProviders: Array<string>
   activeOrgName?: string
   switchableOrgCount: number
-}
-
-export type EffectHttpApiErrorInternalServerError = {
-  _tag: "InternalServerError"
 }
 
 export type ToolListItem = {
@@ -7415,6 +7453,144 @@ export type GlobalUpgradeResponses = {
 }
 
 export type GlobalUpgradeResponse = GlobalUpgradeResponses[keyof GlobalUpgradeResponses]
+
+export type GlobalAccountListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/account"
+}
+
+export type GlobalAccountListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * InternalServerError
+   */
+  500: EffectHttpApiErrorInternalServerError
+}
+
+export type GlobalAccountListError = GlobalAccountListErrors[keyof GlobalAccountListErrors]
+
+export type GlobalAccountListResponses = {
+  /**
+   * Signed-in OpenCode accounts
+   */
+  200: GlobalAccountList
+}
+
+export type GlobalAccountListResponse = GlobalAccountListResponses[keyof GlobalAccountListResponses]
+
+export type GlobalAccountLoginData = {
+  body?: {
+    url?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/account/login"
+}
+
+export type GlobalAccountLoginErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAccountLoginError = GlobalAccountLoginErrors[keyof GlobalAccountLoginErrors]
+
+export type GlobalAccountLoginResponses = {
+  /**
+   * Device sign-in started
+   */
+  200: GlobalAccountLoginStart
+}
+
+export type GlobalAccountLoginResponse = GlobalAccountLoginResponses[keyof GlobalAccountLoginResponses]
+
+export type GlobalAccountLoginPollData = {
+  body?: {
+    id: string
+  }
+  path?: never
+  query?: never
+  url: "/global/account/login/poll"
+}
+
+export type GlobalAccountLoginPollErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAccountLoginPollError = GlobalAccountLoginPollErrors[keyof GlobalAccountLoginPollErrors]
+
+export type GlobalAccountLoginPollResponses = {
+  /**
+   * Sign-in status
+   */
+  200: GlobalAccountPollResult
+}
+
+export type GlobalAccountLoginPollResponse = GlobalAccountLoginPollResponses[keyof GlobalAccountLoginPollResponses]
+
+export type GlobalAccountLogoutData = {
+  body?: {
+    accountID: string
+  }
+  path?: never
+  query?: never
+  url: "/global/account/logout"
+}
+
+export type GlobalAccountLogoutErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalAccountLogoutError = GlobalAccountLogoutErrors[keyof GlobalAccountLogoutErrors]
+
+export type GlobalAccountLogoutResponses = {
+  /**
+   * Signed out
+   */
+  200: boolean
+}
+
+export type GlobalAccountLogoutResponse = GlobalAccountLogoutResponses[keyof GlobalAccountLogoutResponses]
+
+export type GlobalAccountSwitchData = {
+  body?: {
+    accountID: string
+    orgID?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/account/switch"
+}
+
+export type GlobalAccountSwitchErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalAccountSwitchError = GlobalAccountSwitchErrors[keyof GlobalAccountSwitchErrors]
+
+export type GlobalAccountSwitchResponses = {
+  /**
+   * Switched
+   */
+  200: boolean
+}
+
+export type GlobalAccountSwitchResponse = GlobalAccountSwitchResponses[keyof GlobalAccountSwitchResponses]
 
 export type EventSubscribeData = {
   body?: never

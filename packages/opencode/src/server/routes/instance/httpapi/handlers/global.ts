@@ -5,13 +5,27 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { Effect, Queue } from "effect"
+import { Account } from "@/account/account"
+import { AccountID, OrgID, type Login } from "@/account/schema"
+import { errorMessage } from "@/util/error"
+import { randomUUID } from "node:crypto"
+import { Duration, Effect, Option, Queue } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalConfigRemoveInput, GlobalUpgradeInput } from "../groups/global"
+import {
+  GlobalAccountLoginInput,
+  GlobalAccountLogoutInput,
+  GlobalAccountPollInput,
+  GlobalAccountSwitchInput,
+  GlobalConfigRemoveInput,
+  GlobalUpgradeInput,
+} from "../groups/global"
+
+// Same default as `opencode account login`.
+const DEFAULT_CONSOLE_URL = "https://opencode.ai/console"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -61,6 +75,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
   Effect.gen(function* () {
     const config = yield* Config.Service
     const installation = yield* Installation.Service
+    const account = yield* Account.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -123,6 +138,104 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return HttpServerResponse.jsonUnsafe(result)
     })
 
+    // Device sign-ins in progress, keyed by an opaque id so the device code never leaves the
+    // server. Entries are dropped once they finish or expire.
+    const pendingLogins = new Map<string, { login: Login; expiresAt: number }>()
+    // Signing in or out changes which Console org manages providers, so instances reload.
+    const reloadInstances = () => bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
+
+    const accountList = Effect.fn("GlobalHttpApi.accountList")(function* () {
+      const [accounts, active] = yield* Effect.all([account.list(), account.active()], { concurrency: 2 }).pipe(
+        Effect.catch(() => Effect.fail(new HttpApiError.InternalServerError({}))),
+      )
+      // Orgs come from the Console; listing accounts still works offline, just without them.
+      const groups = yield* account.orgsByAccount().pipe(Effect.catch(() => Effect.succeed([])))
+      const orgs = new Map(groups.map((group) => [group.account.id, group.orgs]))
+      const activeID = Option.getOrUndefined(active)?.id
+      return {
+        accounts: accounts.map((item) => ({
+          id: item.id,
+          email: item.email,
+          url: item.url,
+          active: item.id === activeID,
+          activeOrgID: item.active_org_id,
+          orgs: (orgs.get(item.id) ?? []).map((org) => ({ id: org.id, name: org.name })),
+        })),
+      }
+    })
+
+    const accountSwitch = Effect.fn("GlobalHttpApi.accountSwitch")(function* (ctx: {
+      payload: typeof GlobalAccountSwitchInput.Type
+    }) {
+      const accountID = AccountID.make(ctx.payload.accountID)
+      const orgID = yield* ctx.payload.orgID
+        ? Effect.succeed(Option.some(OrgID.make(ctx.payload.orgID)))
+        : account.list().pipe(
+            Effect.map((accounts) =>
+              Option.fromNullishOr(accounts.find((item) => item.id === accountID)?.active_org_id),
+            ),
+            Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))),
+          )
+      yield* account.use(accountID, orgID).pipe(Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))))
+      reloadInstances()
+      return true
+    })
+
+    const accountLogin = Effect.fn("GlobalHttpApi.accountLogin")(function* (ctx: {
+      payload: typeof GlobalAccountLoginInput.Type
+    }) {
+      return yield* account.login(ctx.payload.url ?? DEFAULT_CONSOLE_URL).pipe(
+        Effect.map((login) => {
+          const id = randomUUID()
+          const expiresInSeconds = Duration.toSeconds(login.expiry)
+          pendingLogins.set(id, { login, expiresAt: Date.now() + expiresInSeconds * 1000 })
+          return {
+            success: true as const,
+            id,
+            verificationUrl: login.url,
+            userCode: login.user,
+            intervalSeconds: Duration.toSeconds(login.interval),
+            expiresInSeconds,
+          }
+        }),
+        Effect.catch((err) => Effect.succeed({ success: false as const, error: errorMessage(err) })),
+      )
+    })
+
+    const accountLoginPoll = Effect.fn("GlobalHttpApi.accountLoginPoll")(function* (ctx: {
+      payload: typeof GlobalAccountPollInput.Type
+    }) {
+      const entry = pendingLogins.get(ctx.payload.id)
+      if (!entry) return { status: "expired" as const }
+      if (Date.now() > entry.expiresAt) {
+        pendingLogins.delete(ctx.payload.id)
+        return { status: "expired" as const }
+      }
+      const result = yield* account
+        .poll(entry.login)
+        .pipe(Effect.catch((err) => Effect.succeed({ _tag: "Failed" as const, error: errorMessage(err) })))
+      if (result._tag === "PollPending") return { status: "pending" as const }
+      if (result._tag === "PollSlow") return { status: "slow_down" as const }
+      pendingLogins.delete(ctx.payload.id)
+      if (result._tag === "PollSuccess") {
+        reloadInstances()
+        return { status: "success" as const, email: result.email }
+      }
+      if (result._tag === "PollExpired") return { status: "expired" as const }
+      if (result._tag === "PollDenied") return { status: "denied" as const }
+      return { status: "error" as const, error: result._tag === "Failed" ? result.error : errorMessage(result.cause) }
+    })
+
+    const accountLogout = Effect.fn("GlobalHttpApi.accountLogout")(function* (ctx: {
+      payload: typeof GlobalAccountLogoutInput.Type
+    }) {
+      yield* account
+        .remove(AccountID.make(ctx.payload.accountID))
+        .pipe(Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))))
+      reloadInstances()
+      return true
+    })
+
     return handlers
       .handle("health", health)
       .handleRaw("event", event)
@@ -131,5 +244,10 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("configRemove", configRemove)
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
+      .handle("accountList", accountList)
+      .handle("accountLogin", accountLogin)
+      .handle("accountLoginPoll", accountLoginPoll)
+      .handle("accountLogout", accountLogout)
+      .handle("accountSwitch", accountSwitch)
   }),
 )

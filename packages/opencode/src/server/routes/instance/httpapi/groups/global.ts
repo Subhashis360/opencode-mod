@@ -68,6 +68,68 @@ export const GlobalConfigRemoveInput = Schema.Struct({
   ),
 })
 
+// OpenCode (Console) accounts. The CLI's `opencode account` commands drive the same Account
+// service; these routes let a desktop or web client sign in and out without a terminal.
+const GlobalAccountOrg = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+}).annotate({ identifier: "GlobalAccountOrg" })
+
+// Several accounts can be signed in at once; `active` marks the one in use and `activeOrgID` its
+// org. `orgs` is empty when the Console cannot be reached.
+const GlobalAccount = Schema.Struct({
+  id: Schema.String,
+  email: Schema.String,
+  url: Schema.String,
+  active: Schema.Boolean,
+  activeOrgID: Schema.NullOr(Schema.String),
+  orgs: Schema.Array(GlobalAccountOrg),
+}).annotate({ identifier: "GlobalAccount" })
+
+const GlobalAccountList = Schema.Struct({
+  accounts: Schema.Array(GlobalAccount),
+}).annotate({ identifier: "GlobalAccountList" })
+
+export const GlobalAccountLoginInput = Schema.Struct({
+  url: Schema.optional(Schema.String).annotate({ description: "Console URL, https://opencode.ai/console by default" }),
+})
+
+const GlobalAccountLoginStart = Schema.Union([
+  Schema.Struct({
+    success: Schema.Literal(true),
+    id: Schema.String,
+    verificationUrl: Schema.String,
+    userCode: Schema.String,
+    intervalSeconds: Schema.Finite,
+    expiresInSeconds: Schema.Finite,
+  }),
+  Schema.Struct({
+    success: Schema.Literal(false),
+    error: Schema.String,
+  }),
+]).annotate({ identifier: "GlobalAccountLoginStart" })
+
+export const GlobalAccountPollInput = Schema.Struct({
+  id: Schema.String,
+})
+
+const GlobalAccountPollResult = Schema.Struct({
+  status: Schema.Literals(["pending", "slow_down", "success", "expired", "denied", "error"]),
+  email: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+}).annotate({ identifier: "GlobalAccountPollResult" })
+
+export const GlobalAccountLogoutInput = Schema.Struct({
+  accountID: Schema.String,
+})
+
+export const GlobalAccountSwitchInput = Schema.Struct({
+  accountID: Schema.String,
+  orgID: Schema.optional(Schema.String).annotate({
+    description: "Org to use; keeps the account's current org if omitted",
+  }),
+})
+
 const GlobalUpgradeResult = Schema.Union([
   Schema.Struct({
     success: Schema.Literal(true),
@@ -86,6 +148,11 @@ export const GlobalPaths = {
   configRemove: "/global/config/remove",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
+  account: "/global/account",
+  accountLogin: "/global/account/login",
+  accountLoginPoll: "/global/account/login/poll",
+  accountLogout: "/global/account/logout",
+  accountSwitch: "/global/account/switch",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -159,6 +226,59 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.upgrade",
           summary: "Upgrade opencode",
           description: "Upgrade opencode to the specified version.",
+        }),
+      ),
+      HttpApiEndpoint.get("accountList", GlobalPaths.account, {
+        success: described(GlobalAccountList, "Signed-in OpenCode accounts"),
+        error: HttpApiError.InternalServerError,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.account.list",
+          summary: "List OpenCode accounts",
+          description: "List the OpenCode (Console) accounts signed in on this machine and which one is active.",
+        }),
+      ),
+      HttpApiEndpoint.post("accountLogin", GlobalPaths.accountLogin, {
+        payload: GlobalAccountLoginInput,
+        success: described(GlobalAccountLoginStart, "Device sign-in started"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.account.login",
+          summary: "Start OpenCode account sign-in",
+          description:
+            "Start a device sign-in. Open verificationUrl, enter userCode, then poll /global/account/login/poll.",
+        }),
+      ),
+      HttpApiEndpoint.post("accountLoginPoll", GlobalPaths.accountLoginPoll, {
+        payload: GlobalAccountPollInput,
+        success: described(GlobalAccountPollResult, "Sign-in status"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.account.loginPoll",
+          summary: "Poll OpenCode account sign-in",
+          description: "Check whether a device sign-in started with /global/account/login has been approved.",
+        }),
+      ),
+      HttpApiEndpoint.post("accountLogout", GlobalPaths.accountLogout, {
+        payload: GlobalAccountLogoutInput,
+        success: described(Schema.Boolean, "Signed out"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.account.logout",
+          summary: "Sign out of an OpenCode account",
+          description: "Remove a signed-in OpenCode account from this machine.",
+        }),
+      ),
+      HttpApiEndpoint.post("accountSwitch", GlobalPaths.accountSwitch, {
+        payload: GlobalAccountSwitchInput,
+        success: described(Schema.Boolean, "Switched"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.account.switch",
+          summary: "Switch the active OpenCode account",
+          description: "Make another signed-in account (and optionally one of its orgs) active without signing out.",
         }),
       ),
     )

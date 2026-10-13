@@ -76,6 +76,16 @@ import type {
   FindTextResponses,
   FormatterStatusErrors,
   FormatterStatusResponses,
+  GlobalAccountListErrors,
+  GlobalAccountListResponses,
+  GlobalAccountLoginErrors,
+  GlobalAccountLoginPollErrors,
+  GlobalAccountLoginPollResponses,
+  GlobalAccountLoginResponses,
+  GlobalAccountLogoutErrors,
+  GlobalAccountLogoutResponses,
+  GlobalAccountSwitchErrors,
+  GlobalAccountSwitchResponses,
   GlobalConfigGetErrors,
   GlobalConfigGetResponses,
   GlobalConfigRemoveErrors,
@@ -1341,6 +1351,135 @@ export class Config extends HeyApiClient {
   }
 }
 
+export class Account extends HeyApiClient {
+  /**
+   * List OpenCode accounts
+   *
+   * List the OpenCode (Console) accounts signed in on this machine and which one is active.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalAccountListResponses, GlobalAccountListErrors, ThrowOnError>({
+      url: "/global/account",
+      ...options,
+    })
+  }
+
+  /**
+   * Start OpenCode account sign-in
+   *
+   * Start a device sign-in. Open verificationUrl, enter userCode, then poll /global/account/login/poll.
+   */
+  public login<ThrowOnError extends boolean = false>(
+    parameters?: {
+      url?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "url" }] }])
+    return (options?.client ?? this.client).post<GlobalAccountLoginResponses, GlobalAccountLoginErrors, ThrowOnError>({
+      url: "/global/account/login",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Poll OpenCode account sign-in
+   *
+   * Check whether a device sign-in started with /global/account/login has been approved.
+   */
+  public loginPoll<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "id" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalAccountLoginPollResponses,
+      GlobalAccountLoginPollErrors,
+      ThrowOnError
+    >({
+      url: "/global/account/login/poll",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Sign out of an OpenCode account
+   *
+   * Remove a signed-in OpenCode account from this machine.
+   */
+  public logout<ThrowOnError extends boolean = false>(
+    parameters?: {
+      accountID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "accountID" }] }])
+    return (options?.client ?? this.client).post<GlobalAccountLogoutResponses, GlobalAccountLogoutErrors, ThrowOnError>(
+      {
+        url: "/global/account/logout",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Switch the active OpenCode account
+   *
+   * Make another signed-in account (and optionally one of its orgs) active without signing out.
+   */
+  public switch<ThrowOnError extends boolean = false>(
+    parameters?: {
+      accountID?: string
+      orgID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "accountID" },
+            { in: "body", key: "orgID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalAccountSwitchResponses, GlobalAccountSwitchErrors, ThrowOnError>(
+      {
+        url: "/global/account/switch",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+}
+
 export class Global extends HeyApiClient {
   /**
    * Get health
@@ -1405,6 +1544,11 @@ export class Global extends HeyApiClient {
   private _config?: Config
   get config(): Config {
     return (this._config ??= new Config({ client: this.client }))
+  }
+
+  private _account?: Account
+  get account(): Account {
+    return (this._account ??= new Account({ client: this.client }))
   }
 }
 
