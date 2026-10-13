@@ -27,6 +27,8 @@ export default [
         },
         define: {
           "import.meta.env.VITE_OPENCODE_CHANNEL": JSON.stringify(channel),
+          // OpenCode Mod builds (OPENCODE_MOD=1) unlock features upstream only ships in dev and beta.
+          "import.meta.env.VITE_OPENCODE_MOD": JSON.stringify(process.env.OPENCODE_MOD === "1" ? "1" : ""),
         },
         worker: {
           format: "es",

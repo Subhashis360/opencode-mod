@@ -2,8 +2,9 @@ import { createMemo, createSignal } from "solid-js"
 import { useSDK } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useSync } from "@/context/sync"
+import { prereleaseFeatures } from "@/utils/mod-build"
 
-const workspaceBarEnabled = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
+const workspaceBarEnabled = prereleaseFeatures
 
 export function resolveNewSessionWorktree(input: {
   enabled: boolean
