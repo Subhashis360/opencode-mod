@@ -1,8 +1,10 @@
 import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
-import { createResource, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js"
+import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
+import { createMemo, createResource, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js"
 import { useLanguage } from "@/context/language"
+import { useProviders } from "@/hooks/use-providers"
 import { usePlatform } from "@/context/platform"
 import { useServerSDK } from "@/context/server-sdk"
 import { SettingsListV2 } from "../parts/list"
@@ -21,17 +23,31 @@ const CONSOLE_URL = "https://opencode.ai/console"
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-export function SettingsAccountV2() {
+export function SettingsAccountV2(props: { onOpenProviders?: () => void }) {
   const language = useLanguage()
   const platform = usePlatform()
   const serverSDK = useServerSDK()
   const mod = useModConfig()
+  const providers = useProviders(() => undefined)
   const client = () => serverSDK().client.global.account
 
   const [accounts, { refetch }] = createResource(
     () => mod.available() || undefined,
     async (): Promise<Account[]> => (await client().list()).data?.accounts ?? [],
   )
+  // A failed lookup (for example a server without these routes) shows a message instead of breaking.
+  const accountList = () => (accounts.error ? [] : (accounts() ?? []))
+
+  // Chats can run without an OpenCode account, so show what they actually use: the free models and
+  // every provider connected with its own key, sign-in, environment variable or config.
+  const connectedProviders = createMemo(() => providers.connected().filter((provider) => provider.id !== "opencode"))
+  const sourceLabel = (provider: { source?: unknown }) => {
+    if (provider.source === "env") return language.t("settings.providers.tag.environment")
+    if (provider.source === "api") return language.t("provider.connect.method.apiKey")
+    if (provider.source === "config") return language.t("settings.providers.tag.config")
+    if (provider.source === "custom") return language.t("settings.providers.tag.custom")
+    return language.t("settings.providers.tag.other")
+  }
 
   const [signIn, setSignIn] = createSignal<SignIn>()
   const [copied, setCopied] = createSignal(false)
@@ -194,10 +210,14 @@ export function SettingsAccountV2() {
           <div class="settings-v2-section">
             <SettingsListV2>
               <Show
-                when={(accounts() ?? []).length > 0}
-                fallback={<div class="settings-v2-provider-empty">{language.t("mod.account.empty")}</div>}
+                when={accountList().length > 0}
+                fallback={
+                  <div class="settings-v2-provider-empty">
+                    {accounts.error ? language.t("mod.account.error.unavailable") : language.t("mod.account.empty")}
+                  </div>
+                }
               >
-                <For each={accounts()}>
+                <For each={accountList()}>
                   {(account) => (
                     <div class="settings-v2-provider-row">
                       <div class="settings-v2-provider-lead">
@@ -244,6 +264,48 @@ export function SettingsAccountV2() {
                 </For>
               </Show>
             </SettingsListV2>
+          </div>
+
+          <div class="settings-v2-section">
+            <h3 class="settings-v2-section-title">{language.t("mod.account.access.title")}</h3>
+            <p class="mod-tab-description">{language.t("mod.account.access.description")}</p>
+            <SettingsListV2>
+              <div class="settings-v2-provider-row">
+                <div class="settings-v2-provider-lead">
+                  <ProviderIcon id="opencode" width={16} height={16} class="settings-v2-provider-icon shrink-0" />
+                  <div class="settings-v2-provider-copy">
+                    <div class="settings-v2-provider-main">
+                      <span class="settings-v2-provider-name">{language.t("mod.account.access.free")}</span>
+                      <Tag>{language.t("mod.account.access.free.tag")}</Tag>
+                    </div>
+                    <p class="settings-v2-provider-description">{language.t("mod.account.access.free.description")}</p>
+                  </div>
+                </div>
+              </div>
+              <For each={connectedProviders()}>
+                {(provider) => (
+                  <div class="settings-v2-provider-row">
+                    <div class="settings-v2-provider-lead">
+                      <ProviderIcon
+                        id={provider.id}
+                        width={16}
+                        height={16}
+                        class="settings-v2-provider-icon shrink-0"
+                      />
+                      <div class="settings-v2-provider-main">
+                        <span class="settings-v2-provider-name">{provider.name}</span>
+                        <Tag>{sourceLabel(provider)}</Tag>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </SettingsListV2>
+            <Show when={props.onOpenProviders}>
+              <ButtonV2 size="normal" variant="neutral" onClick={() => props.onOpenProviders?.()}>
+                {language.t("mod.account.access.manage")}
+              </ButtonV2>
+            </Show>
           </div>
         </Show>
       </div>

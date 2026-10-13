@@ -147,6 +147,13 @@ export const dict = {
   "mod.account.error.denied": "Sign-in was declined.",
   "mod.account.error.failed": "Sign-in failed: {{message}}",
   "mod.account.error.unavailable": "This server does not support signing in from the app.",
+  "mod.account.access.title": "How you are connected",
+  "mod.account.access.description":
+    "Chats work without an OpenCode account: free models need no sign-in, and providers you connected use their own keys or sign-ins.",
+  "mod.account.access.free": "OpenCode free models",
+  "mod.account.access.free.description": "Models such as Big Pickle and others ending in -free. No sign-in needed.",
+  "mod.account.access.free.tag": "No sign-in",
+  "mod.account.access.manage": "Manage providers",
 
   "mod.experimental.title": "Experimental",
   "mod.experimental.description":

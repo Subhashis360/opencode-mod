@@ -145,7 +145,7 @@ export const DialogSettings: Component<{
           <SettingsModelsV2 />
         </TabsV2.Content>
         <TabsV2.Content value="account" class="settings-v2-panel">
-          <SettingsAccountV2 />
+          <SettingsAccountV2 onOpenProviders={() => void startTransition(() => setTab("providers"))} />
         </TabsV2.Content>
         <TabsV2.Content value="agents" class="settings-v2-panel">
           <SettingsAgentsV2 />
