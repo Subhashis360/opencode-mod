@@ -31,6 +31,14 @@ Connected custom (OpenAI-compatible) providers get an **Edit** button. The form 
 
 Sign in to your OpenCode account (Zen, Go and Console orgs) from **Settings → Mod → OpenCode Account**, without a terminal. Click **Add account**, approve the code in your browser, and the page updates by itself. You can stay signed in to several accounts at once, **switch** between them (and between an account's orgs) without signing out, and **sign out** of any of them.
 
+### Session limits
+
+**Settings → Mod → Session limits** shows how much of OpenCode's free tier you have used: whether it is available or was hit today, the public IP it is counted against, the time until it resets (midnight UTC), today's requests and tokens per model, and the last 7 days. OpenCode does not publish the limit, so the tab estimates it, and what is left today, from the last day you hit it. Counts come from this machine; other devices on the same network share the same limit.
+
+### System prompt
+
+**Settings → Mod → System prompt** shows whether each main agent (Build, Plan and your own) uses OpenCode's built-in prompt for its model or a custom one. Edit a prompt starting from a built-in one, from the latest version on OpenCode's GitHub, or from your saved prompts, and **reset to default** at any time. Built-in prompts can be viewed and compared with GitHub, and saved to **My prompts**.
+
 ### Agents
 
 Create, edit, enable/disable and delete custom agents: name, mode (primary, subagent or both), model, system prompt, temperature, max steps, color, and per-agent limits for editing files, running commands and fetching web pages.
