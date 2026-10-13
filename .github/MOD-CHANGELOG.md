@@ -14,6 +14,12 @@ First release of OpenCode Mod, based on OpenCode 1.18.29.
 - **Permissions**: Read-only audit, Safe, Balanced and Full auto presets, plus Allow/Ask/Deny per tool.
 - **MCP Servers**: add, edit, toggle and delete local or remote MCP servers, with Playwright, Context7, GitHub, Filesystem and Sequential Thinking templates.
 - **Commands**: custom `/name` prompts with `$ARGUMENTS`, shell output and file attachments.
+- **OpenCode Account**: sign in to your OpenCode account from the app, stay signed in to several accounts, switch between accounts and orgs without signing out, and sign out of any of them.
+- **Experimental**: switch on engine features upstream leaves off (code mode, background subagents, LSP tool, Exa/Parallel web search, alpha models, native LLM client and more), and raise the shell timeout and output token limit.
+
+**Unlocked**
+
+- Features upstream only enables in dev and beta builds, such as the workspace bar on new sessions, are on.
 
 **Improvements**
 
