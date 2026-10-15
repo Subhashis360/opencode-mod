@@ -100,6 +100,8 @@ import type {
   GlobalHealthResponses,
   GlobalModFreeTierErrors,
   GlobalModFreeTierResponses,
+  GlobalModModelsRefreshErrors,
+  GlobalModModelsRefreshResponses,
   GlobalModPromptsErrors,
   GlobalModPromptsResponses,
   GlobalModPromptsUpstreamErrors,
@@ -1522,6 +1524,19 @@ export class Mod extends HeyApiClient {
       GlobalModPromptsUpstreamErrors,
       ThrowOnError
     >({ url: "/global/mod/prompts/upstream", ...options })
+  }
+
+  /**
+   * Refresh the model catalog
+   *
+   * Download the model catalog from models.opencode.ai now instead of waiting for the hourly refresh. Each catalog publishes catalog.updated once it has reloaded.
+   */
+  public modelsRefresh<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<
+      GlobalModModelsRefreshResponses,
+      GlobalModModelsRefreshErrors,
+      ThrowOnError
+    >({ url: "/global/mod/models/refresh", ...options })
   }
 }
 

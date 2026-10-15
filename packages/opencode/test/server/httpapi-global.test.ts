@@ -8,6 +8,7 @@ import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { Account } from "../../src/account/account"
 import { Database } from "@opencode-ai/core/database/database"
+import { ModelsDev } from "@opencode-ai/core/models-dev"
 import {
   AccountID,
   DeviceCode,
@@ -40,6 +41,7 @@ const signedIn = new Info({
 })
 const removed: string[] = []
 const used: [string, string | null][] = []
+const refreshes: (boolean | undefined)[] = []
 let polls = 0
 const accountMock = Layer.mock(Account.Service)({
   list: () => Effect.succeed([signedIn]),
@@ -80,6 +82,7 @@ const apiLayer = HttpRouter.serve(
   // The routes these tests call never touch the database.
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   Layer.provide(Layer.mock(Database.Service)({ db: {} as never })),
+  Layer.provide(Layer.mock(ModelsDev.Service)({ refresh: (force) => Effect.sync(() => void refreshes.push(force)) })),
   Layer.provide(
     Layer.mock(Installation.Service)({
       method: () => Effect.succeed("npm"),
@@ -92,6 +95,16 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("refreshes the model catalog without the cache", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.post(GlobalPaths.modModelsRefresh).pipe(HttpClient.execute)
+
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toBe(true)
+      expect(refreshes).toEqual([true])
+    }),
+  )
+
   it.live("upgrades to the requested version", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(GlobalPaths.upgrade).pipe(

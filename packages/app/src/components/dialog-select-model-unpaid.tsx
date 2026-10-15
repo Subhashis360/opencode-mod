@@ -5,9 +5,10 @@ import { List, type ListRef } from "@opencode-ai/ui/list"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { Tag } from "@opencode-ai/ui/tag"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
-import { type Component, Show } from "solid-js"
+import { type Component, onMount, Show } from "solid-js"
 import { useLocal } from "@/context/local"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
+import { useModelCatalogRefresh } from "@/hooks/use-model-catalog-refresh"
 import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
@@ -20,6 +21,7 @@ export const DialogSelectModelUnpaid: Component<{ model?: ModelState }> = (props
   const dialog = useDialog()
   const directory = () => decode64(local.slug())
   const providers = useProviders(directory)
+  onMount(useModelCatalogRefresh())
   const language = useLanguage()
 
   const openProviders = (provider?: string) => {

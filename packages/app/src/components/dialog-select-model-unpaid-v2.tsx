@@ -8,6 +8,7 @@ import { useTheme } from "@opencode-ai/ui/theme"
 import { createMemo, onCleanup, onMount, type Component, For, Show } from "solid-js"
 import { useLocal } from "@/context/local"
 import { useProviders } from "@/hooks/use-providers"
+import { useModelCatalogRefresh } from "@/hooks/use-model-catalog-refresh"
 import { decode64 } from "@/utils/base64"
 import { useLanguage } from "@/context/language"
 import { ModelTooltip } from "./model-tooltip"
@@ -23,6 +24,7 @@ export const DialogSelectModelUnpaidV2: Component<{ model?: ModelState }> = (pro
   const theme = useTheme()
   const directory = () => decode64(local.slug())
   const providers = useProviders(directory)
+  onMount(useModelCatalogRefresh())
   const language = useLanguage()
   const modelKey = (item: ReturnType<ModelState["list"]>[number]) => `${item.provider.id}:${item.id}`
   const currentKey = createMemo(() => {

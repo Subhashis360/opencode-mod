@@ -22,7 +22,8 @@ import {
   ProcessId,
 } from "effect/unstable/process/ChildProcessSpawner"
 import * as NodeChildProcess from "node:child_process"
-import { PassThrough } from "node:stream"
+import { Socket } from "node:net"
+import { PassThrough, type Readable } from "node:stream"
 import launch from "cross-spawn"
 import { makeGlobalNode } from "./effect/app-node"
 import { filesystem, path } from "./effect/app-node-platform"
@@ -95,6 +96,27 @@ const toPlatformError = (
 }
 
 type ExitSignal = Deferred.Deferred<readonly [code: number | null, signal: NodeJS.Signals | null]>
+
+// How long to wait for a process's output pipes to close after the process has exited.
+const EXIT_DRAIN_MS = 1_000
+
+// Consumers read a child's output through a PassThrough and destroy it when they stop reading.
+// A background process the child started may still hold the pipe; destroying the pipe itself
+// would kill it with a broken pipe, and leaving it unread would block it once the pipe fills.
+// So when the reader goes away first, keep draining (and discarding) the pipe instead, without
+// it keeping this process alive.
+function detachable(pipe: Readable) {
+  const tap = new PassThrough()
+  pipe.on("error", (err) => tap.destroy(toError(err)))
+  pipe.pipe(tap)
+  tap.once("close", () => {
+    if (pipe.readableEnded || pipe.destroyed) return
+    pipe.unpipe(tap)
+    pipe.resume()
+    if (pipe instanceof Socket) pipe.unref()
+  })
+  return tap
+}
 
 export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
@@ -245,15 +267,17 @@ export const make = Effect.gen(function* () {
     out: ChildProcess.StdoutConfig,
     err: ChildProcess.StderrConfig,
   ) => {
-    let stdout = proc.stdout
+    const outPipe = proc.stdout && detachable(proc.stdout)
+    const errPipe = proc.stderr && detachable(proc.stderr)
+    let stdout = outPipe
       ? NodeStream.fromReadable({
-          evaluate: () => proc.stdout!,
+          evaluate: () => outPipe,
           onError: (cause) => toPlatformError("fromReadable(stdout)", toError(cause), command),
         })
       : Stream.empty
-    let stderr = proc.stderr
+    let stderr = errPipe
       ? NodeStream.fromReadable({
-          evaluate: () => proc.stderr!,
+          evaluate: () => errPipe,
           onError: (cause) => toPlatformError("fromReadable(stderr)", toError(cause), command),
         })
       : Stream.empty
@@ -270,17 +294,26 @@ export const make = Effect.gen(function* () {
       const proc = launch(command.command, command.args, opts)
       let end = false
       let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
+      let drain: ReturnType<typeof setTimeout> | undefined
+      const settle = (args: readonly [code: number | null, signal: NodeJS.Signals | null]) => {
+        if (end) return
+        end = true
+        clearTimeout(drain)
+        Deferred.doneUnsafe(signal, Exit.succeed(args))
+      }
       proc.on("error", (err) => {
         resume(Effect.fail(toPlatformError("spawn", err, command)))
       })
       proc.on("exit", (...args) => {
         exit = args
+        // "close" waits for every process holding the stdout/stderr pipes, including anything the
+        // command started in the background (a dev server via `start /b` or `Start-Process
+        // -NoNewWindow`), which can run forever. Once the process itself has exited, give its
+        // output a moment to drain and then report the exit.
+        drain = setTimeout(() => settle(args), EXIT_DRAIN_MS)
+        drain.unref()
       })
-      proc.on("close", (...args) => {
-        if (end) return
-        end = true
-        Deferred.doneUnsafe(signal, Exit.succeed(exit ?? args))
-      })
+      proc.on("close", (...args) => settle(exit ?? args))
       proc.on("spawn", () => {
         resume(Effect.succeed([proc, signal]))
       })

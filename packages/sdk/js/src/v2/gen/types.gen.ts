@@ -7698,6 +7698,31 @@ export type GlobalModPromptsUpstreamResponses = {
 export type GlobalModPromptsUpstreamResponse =
   GlobalModPromptsUpstreamResponses[keyof GlobalModPromptsUpstreamResponses]
 
+export type GlobalModModelsRefreshData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/mod/models/refresh"
+}
+
+export type GlobalModModelsRefreshErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModModelsRefreshError = GlobalModModelsRefreshErrors[keyof GlobalModModelsRefreshErrors]
+
+export type GlobalModModelsRefreshResponses = {
+  /**
+   * Refreshed
+   */
+  200: boolean
+}
+
+export type GlobalModModelsRefreshResponse = GlobalModModelsRefreshResponses[keyof GlobalModModelsRefreshResponses]
+
 export type EventSubscribeData = {
   body?: never
   path?: never

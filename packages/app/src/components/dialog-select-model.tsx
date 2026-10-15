@@ -1,5 +1,5 @@
 import { Popover as Kobalte } from "@kobalte/core/popover"
-import { Component, ComponentProps, createEffect, createMemo, For, JSX, Show } from "solid-js"
+import { Component, ComponentProps, createEffect, createMemo, For, JSX, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
@@ -22,6 +22,7 @@ import { handleDocumentSearchKeydown } from "@/utils/search-keydown"
 import { createMenuDismissController } from "@/utils/menu-dismiss-controller"
 import { createEventListener } from "@solid-primitives/event-listener"
 import { matchesModelSearch } from "./dialog-select-model-search"
+import { useModelCatalogRefresh } from "@/hooks/use-model-catalog-refresh"
 
 const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "opencode" && (!cost || cost.input === 0)
@@ -132,6 +133,7 @@ export function ModelSelectorPopover(props: {
   const dialog = useDialog()
   const local = useLocal()
   const directory = () => decode64(local.slug())
+  const refreshCatalog = useModelCatalogRefresh()
 
   const close = (dismiss: Dismiss) => {
     setStore("dismiss", dismiss)
@@ -157,7 +159,10 @@ export function ModelSelectorPopover(props: {
     <Kobalte
       open={store.open}
       onOpenChange={(next) => {
-        if (next) setStore("dismiss", null)
+        if (next) {
+          setStore("dismiss", null)
+          refreshCatalog()
+        }
         setStore("open", next)
       }}
       modal={false}
@@ -302,6 +307,7 @@ function ModelSelectorPopoverV2View(props: {
 }) {
   const language = useLanguage()
   const [store, setStore] = createStore({ open: false, search: "", active: "" })
+  const refreshCatalog = useModelCatalogRefresh()
   let searchRef: HTMLInputElement | undefined
   let contentRef: HTMLDivElement | undefined
   const dismiss = createMenuDismissController(() => contentRef)
@@ -320,6 +326,7 @@ function ModelSelectorPopoverV2View(props: {
   const setOpen = (open: boolean) => {
     if (open) {
       dismiss.allowTriggerRestore()
+      refreshCatalog()
       setStore({ open: true, active: initialActive() })
       setTimeout(() =>
         requestAnimationFrame(() => {
@@ -526,6 +533,7 @@ export const DialogSelectModel: Component<{ provider?: string; model?: ModelStat
   const language = useLanguage()
   const local = useLocal()
   const directory = () => decode64(local.slug())
+  onMount(useModelCatalogRefresh())
 
   const provider = () => {
     void import("./dialog-connect-provider").then((x) => {

@@ -376,6 +376,89 @@ describe("cross-spawn spawner", () => {
     )
   })
 
+  describe("background children holding the output pipe", () => {
+    // A shell starts a logging child in the background the way agents start dev servers
+    // (`Start-Process -NoNewWindow` on Windows, `&` elsewhere), so the child inherits the shell's
+    // stdout/stderr, and then the shell exits. The child writes its pid to a file.
+    const start = Effect.fnUntraced(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const pidFile = path.join(tmp.path, "child.pid")
+      const child = path.join(tmp.path, "child.js")
+      yield* Effect.promise(() =>
+        fs.writeFile(
+          child,
+          `require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid))
+setInterval(() => { console.log("child log"); console.error("child err") }, 50)
+setTimeout(() => process.exit(0), 8000)`,
+        ),
+      )
+      const command =
+        process.platform === "win32"
+          ? ChildProcess.make("powershell.exe", [
+              "-NoLogo",
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              `Start-Process '${process.execPath}' -ArgumentList '"${child}"' -NoNewWindow; 'shell done'`,
+            ])
+          : ChildProcess.make("sh", ["-c", `'${process.execPath}' '${child}' & echo shell done`])
+      const pid = Effect.promise(async () => {
+        const end = Date.now() + 5_000
+        while (Date.now() < end) {
+          const text = await fs.readFile(pidFile, "utf8").catch(() => "")
+          if (text) return Number(text)
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+        throw new Error("background child never started")
+      })
+      yield* Effect.addFinalizer(() =>
+        pid.pipe(
+          Effect.flatMap((pid) => Effect.sync(() => alive(pid) && process.kill(pid))),
+          Effect.ignore,
+        ),
+      )
+      return { command, pid }
+    })
+
+    fx.effect(
+      "reports the exit without waiting for the background child",
+      Effect.gen(function* () {
+        const { command } = yield* start()
+        const started = Date.now()
+        const code = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const handle = yield* ChildProcessSpawner.ChildProcessSpawner.use((svc) => svc.spawn(command))
+            yield* Effect.forkScoped(Stream.runDrain(handle.all))
+            return yield* handle.exitCode
+          }),
+        )
+        expect(code).toBe(ChildProcessSpawner.ExitCode(0))
+        expect(Date.now() - started).toBeLessThan(4_000)
+      }),
+    )
+
+    fx.effect(
+      "keeps the background child alive after its output stops being read",
+      Effect.gen(function* () {
+        const { command, pid } = yield* start()
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const handle = yield* ChildProcessSpawner.ChildProcessSpawner.use((svc) => svc.spawn(command))
+            yield* Effect.forkScoped(Stream.runDrain(handle.all))
+            yield* handle.exitCode
+          }),
+        )
+        const child = yield* pid
+        // The child logs every 50 ms; with a closed or unread pipe it would die or block by now.
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 1_500)))
+        expect(alive(child)).toBe(true)
+      }),
+    )
+  })
+
   describe("Windows-specific", () => {
     fx.effect(
       "uses shell routing on Windows",

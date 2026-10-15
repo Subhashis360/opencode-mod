@@ -11,6 +11,7 @@ import { errorMessage } from "@/util/error"
 import * as ModFreeTier from "@/mod/free-tier"
 import { BUILT_IN_PROMPTS, upstreamPrompts } from "@/mod/prompts"
 import { Database } from "@opencode-ai/core/database/database"
+import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { randomUUID } from "node:crypto"
 import { Duration, Effect, Option, Queue } from "effect"
 import * as Stream from "effect/Stream"
@@ -80,6 +81,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const installation = yield* Installation.Service
     const account = yield* Account.Service
     const database = yield* Database.Service
+    const modelsDev = yield* ModelsDev.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -259,6 +261,13 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return { prompts: yield* Effect.promise(upstreamPrompts) }
     })
 
+    // The model picker calls this each time it opens. The catalogs reload from the new download
+    // and publish catalog.updated, which makes the app refetch its provider lists.
+    const modModelsRefresh = Effect.fn("GlobalHttpApi.modModelsRefresh")(function* () {
+      yield* modelsDev.refresh(true)
+      return true
+    })
+
     return handlers
       .handle("health", health)
       .handleRaw("event", event)
@@ -275,5 +284,6 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("modFreeTier", modFreeTier)
       .handle("modPrompts", modPrompts)
       .handle("modPromptsUpstream", modPromptsUpstream)
+      .handle("modModelsRefresh", modModelsRefresh)
   }),
 )

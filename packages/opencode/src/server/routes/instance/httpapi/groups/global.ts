@@ -185,6 +185,7 @@ export const GlobalPaths = {
   modFreeTier: "/global/mod/free-tier",
   modPrompts: "/global/mod/prompts",
   modPromptsUpstream: "/global/mod/prompts/upstream",
+  modModelsRefresh: "/global/mod/models/refresh",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -339,6 +340,16 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.mod.promptsUpstream",
           summary: "Get upstream system prompts",
           description: "The built-in system prompts as they are now on upstream OpenCode's dev branch.",
+        }),
+      ),
+      HttpApiEndpoint.post("modModelsRefresh", GlobalPaths.modModelsRefresh, {
+        success: described(Schema.Boolean, "Refreshed"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.mod.modelsRefresh",
+          summary: "Refresh the model catalog",
+          description:
+            "Download the model catalog from models.opencode.ai now instead of waiting for the hourly refresh. Each catalog publishes catalog.updated once it has reloaded.",
         }),
       ),
     )

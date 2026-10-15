@@ -11,6 +11,7 @@ import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { Account } from "../../src/account/account"
 import { Database } from "@opencode-ai/core/database/database"
+import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { ServerAuth } from "../../src/server/auth"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
 import { controlHandlers } from "../../src/server/routes/instance/httpapi/handlers/control"
@@ -45,6 +46,7 @@ const apiLayer = HttpRouter.serve(
   // The routes these tests call never touch the database.
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   Layer.provide(Layer.mock(Database.Service)({ db: {} as never })),
+  Layer.provide(Layer.mock(ModelsDev.Service)({})),
   Layer.provide(
     Layer.mock(MoveSession.Service)({
       moveSession: (value) => Ref.set(called, value),
