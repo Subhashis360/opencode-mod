@@ -1,212 +1,208 @@
 <div align="center">
 
-<img src="assets/banner.svg" alt="OpenCode Mod settings: Session limits tab showing free-tier status, current IP, reset timer and today's usage" width="100%">
+<img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Alien%20Monster.png" alt="" width="84">
 
 # OpenCode Mod
 
-**The power-user desktop app for the [OpenCode](https://github.com/anomalyco/opencode) AI coding agent.**<br>
-Multiple accounts, free-tier tracking, editable system prompts, custom agents, MCP servers and hidden features, all in one Settings screen.
+**A free AI coding agent for Windows that can also use your computer.**<br>
+The OpenCode desktop app with everything unlocked: computer use, free models, a full mod menu, scheduled tasks, hooks and memory.
 
-[![Latest release](https://img.shields.io/github/v/release/Subhashis360/opencode-mod?style=flat-square&label=release&color=7C5CFF)](https://github.com/Subhashis360/opencode-mod/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Subhashis360/opencode-mod/total?style=flat-square&color=22D3EE)](https://github.com/Subhashis360/opencode-mod/releases)
-[![Stars](https://img.shields.io/github/stars/Subhashis360/opencode-mod?style=flat-square&color=F5C542)](https://github.com/Subhashis360/opencode-mod/stargazers)
-[![License: MIT](https://img.shields.io/badge/license-MIT-2EA043?style=flat-square)](../LICENSE)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=flat-square)](#install)
+[![Download](https://img.shields.io/badge/Download-Windows%20x64-00E599?style=for-the-badge&logo=windows&logoColor=white&labelColor=0D1117)](https://github.com/Subhashis360/opencode-mod/releases/latest/download/opencode-mod-win-x64.exe)
+[![Release](https://img.shields.io/github/v/release/Subhashis360/opencode-mod?style=for-the-badge&label=release&labelColor=0D1117&color=7C5CFF)](https://github.com/Subhashis360/opencode-mod/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Subhashis360/opencode-mod/total?style=for-the-badge&labelColor=0D1117&color=22D3EE)](https://github.com/Subhashis360/opencode-mod/releases)
+[![Stars](https://img.shields.io/github/stars/Subhashis360/opencode-mod?style=for-the-badge&labelColor=0D1117&color=F5C542)](https://github.com/Subhashis360/opencode-mod/stargazers)
+[![License](https://img.shields.io/badge/license-MIT-2EA043?style=for-the-badge&labelColor=0D1117)](../LICENSE)
 
-### [⬇&nbsp;&nbsp;Download for Windows](https://github.com/Subhashis360/opencode-mod/releases/latest/download/opencode-mod-win-x64.exe)
+[Computer use](#computer-use-for-0) · [Free models](#free-models-no-api-key) · [Mod menu](#the-mod-menu) · [Speed](#built-to-be-quick) · [Install](#install) · [FAQ](#faq)
 
-[Features](#features) · [Install](#install) · [Compare](#opencode-vs-opencode-mod) · [FAQ](#faq) · [Build from source](#for-developers)
+<img src="assets/screenshots/experimental.png" alt="OpenCode Mod settings: the Experimental tab with Computer use switched on, next to the full Mod menu (OpenCode Account, Session limits, Agents, System prompt, Permissions, MCP Servers, Commands, Scheduled, Hooks, Memory)" width="100%">
 
-<sub>Unofficial community build. Installs <b>next to</b> OpenCode, never over it.</sub>
+<sub>Real screenshots of OpenCode Mod, taken from a fresh install. Unofficial community build, installs <b>next to</b> OpenCode, never over it.</sub>
 
 </div>
 
-<br>
+```text
+$ opencode-mod
+[ ok ] mod menu ........... 11 tabs, no JSON editing
+[ ok ] computer use ....... sees and drives Windows apps
+[ ok ] free models ........ no API key, no sign-in
+[ ok ] scheduler .......... cron, tray, notifications
+[ ok ] hooks + memory ..... loaded
+ready.
+```
 
-## Why OpenCode Mod
+## Computer use for $0
 
-OpenCode is an excellent open-source AI coding agent, but its desktop app keeps a lot of power out of reach: agents, permissions, MCP servers and system prompts live in JSON files, accounts need the terminal, and dozens of engine features ship switched off.
+<img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Objects/Desktop%20Computer.png" alt="" width="40" align="right">
 
-OpenCode Mod puts all of it in **Settings → Mod**, with forms, templates and one-click presets, and keeps working with the same config, CLI and free models you already use.
+Letting an AI drive your desktop usually starts at **$20 a month**. Claude's computer use (Cowork, Claude in Chrome) needs a paid Claude plan, and ChatGPT's agent mode needs ChatGPT Plus. OpenCode Mod does it with the free models already built into OpenCode. No card, no API key, no account.
 
-- **Nothing to migrate.** It reads and writes the same OpenCode configuration as the official app and the `opencode` CLI.
-- **Nothing to lose.** It installs as a separate app with its own folder, shortcuts and data, and updates itself from this repository.
-- **Nothing hidden.** Every change is plain OpenCode config you can inspect, and the full source is right here.
+You tell the agent what you want, and it opens apps, reads windows, clicks, types and checks its own work. It's built for the boring stuff between your code and the rest of your PC: settings dialogs, installers, desktop tools that have no API.
 
-## Features
+|                    | **OpenCode Mod**                                        | Claude (Cowork / in Chrome) | ChatGPT agent                        |
+| ------------------ | ------------------------------------------------------- | --------------------------- | ------------------------------------ |
+| Cost to use it     | **$0** with OpenCode's free models                      | Paid plan, from $20/month   | Plus plan, $20/month                 |
+| Which AI drives it | **Any:** free models, Claude, GPT, Gemini, local models | Claude only                 | OpenAI only                          |
+| What it controls   | **Your own Windows apps**, on your PC                   | Your desktop or Chrome      | A virtual computer in OpenAI's cloud |
+| Usage limit        | Free tier daily limit, none with your own key           | Plan limits                 | Monthly agent message cap            |
+| Source code        | **Open, MIT**                                           | Closed                      | Closed                               |
+
+<sub>Prices as of October 2026. Check <a href="https://claude.com/pricing">claude.com/pricing</a> and <a href="https://openai.com/chatgpt/pricing">openai.com/chatgpt/pricing</a> for current plans.</sub>
+
+**How it works, briefly**
+
+- **Reads windows as text first.** `read_window` pulls the buttons, fields and menus of a window through Windows UI Automation, so the model often doesn't need a screenshot at all. That's cheaper, faster, and it works with text-only free models.
+- **Clicks without taking your mouse.** `click_element` presses buttons, ticks checkboxes and opens menus through accessibility, so your cursor stays where you left it. It only falls back to a real click when a control can't be pressed that way, and it tells you when it did.
+- **Sees when it needs to.** Several free models in the picker read images, so screenshots and zoom work at no cost too.
+- **Asks first.** You approve each app the first time the agent touches it. Terminals and IDEs only get plain clicks and scrolling, and the agent can't drive OpenCode Mod itself.
+
+Turn it on in **Settings → Mod → Experimental → Computer use**. Windows only for now.
+
+## Free models, no API key
+
+<img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Objects/Money%20Bag.png" alt="" width="40" align="right">
+
+OpenCode gives away a set of capable models through its own gateway. OpenCode Mod shows **every one of them** in the model picker, pulled live from OpenCode's catalog each time you open it, so new free models show up without an update.
+
+Free usage is counted **per public IP per day** and resets at midnight UTC. The **Session limits** tab shows where you stand: whether the free tier is available right now, the IP you're counted against, time until reset and how much you've used.
 
 <table>
 <tr>
-<td width="50%" valign="top">
-
-### 👤 Multiple OpenCode accounts
-
-Sign in from the app, stay signed in to several accounts and **switch between accounts and orgs** without signing out.
-
-</td>
-<td width="50%" valign="top">
-
-### 📊 Free-tier session limits
-
-See if the free tier is available, the **IP it is counted against**, time until reset, today's usage and an estimate of what is left.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### 🧠 System prompt editor
-
-View the built-in prompt for each model, **compare it with GitHub's latest**, write your own per agent, and reset to default.
-
-</td>
-<td valign="top">
-
-### 🤖 Custom agents
-
-Create agents with their own model, prompt, temperature and tool limits. Templates include **Security Auditor**, **Code Reviewer**, **Debugger** and more.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### 🛡️ Permission presets
-
-**Read-only audit**, **Safe**, **Balanced** or **Full auto** in one click, plus Allow / Ask / Deny for every tool.
-
-</td>
-<td valign="top">
-
-### 🔌 MCP servers
-
-Add local or remote **Model Context Protocol** servers with templates for Playwright, Context7, GitHub, Filesystem and Sequential Thinking.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### ⚡ Slash commands
-
-Reusable `/commands` with `$ARGUMENTS`, shell output and file attachments: `/review`, `/audit`, `/tests`, `/commit` and more.
-
-</td>
-<td valign="top">
-
-### 🧪 Experimental features
-
-Turn on engine features OpenCode ships off: **code mode**, background subagents, the LSP tool, Exa or Parallel search, alpha models and more.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### ✏️ Editable custom providers
-
-Edit an OpenAI-compatible provider's URL, models and headers in place instead of deleting and re-adding it.
-
-</td>
-<td valign="top">
-
-### 🔄 Auto-updates, side by side
-
-Runs next to the official app with its own shortcuts and data, and **updates itself** from GitHub Releases.
-
-</td>
+<td width="50%"><img src="assets/screenshots/model-picker.png" alt="OpenCode Mod model picker listing a dozen free models, each tagged Free, with OpenAI, Anthropic, Google and GitHub Copilot below" width="100%"></td>
+<td width="50%"><img src="assets/screenshots/session-limits.png" alt="Session limits tab showing free-tier status Available, current IP, time until reset and requests used today" width="100%"></td>
 </tr>
 </table>
 
+Want more? Connect Anthropic, OpenAI, Google, GitHub Copilot, OpenRouter or any of 75+ providers, or a local model. Everything below works with all of them.
+
+## The Mod menu
+
+<img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Objects/Gear.png" alt="" width="40" align="right">
+
+OpenCode keeps most of its power in config files and environment variables. OpenCode Mod puts it in one place, **Settings → Mod**, with forms, templates and one-click presets. It writes the same config the `opencode` CLI reads, so nothing gets locked in.
+
+| Tab                  | What it's for                                                                                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **OpenCode Account** | Sign in from the app, stay signed in to several accounts and switch accounts or orgs                                                                                          |
+| **Session limits**   | Free-tier status, your public IP, reset countdown, usage per model and a 7-day history                                                                                        |
+| **Agents**           | Your own agents with their own model, prompt and tool limits. Templates: Security Auditor, Bug Bounty Assistant, Code Reviewer, Debugger, Test Writer, Architect, Docs Writer |
+| **System prompt**    | Read and edit the prompt each agent starts with, pull the newest built-in prompts from GitHub                                                                                 |
+| **Permissions**      | Read-only audit, Safe, Balanced or Full auto in one click, plus Allow / Ask / Deny per tool                                                                                   |
+| **MCP Servers**      | Add Model Context Protocol servers. Templates for Playwright, Context7, GitHub, Filesystem, Sequential Thinking                                                               |
+| **Commands**         | Your own `/commands`: `/review`, `/audit`, `/tests`, `/explain`, `/commit`, `/fix` to start from                                                                              |
+| **Scheduled**        | Prompts that run on a timer or cron, each in a fresh session, even with the window closed to the tray                                                                         |
+| **Hooks**            | Shell commands on agent events. Block risky commands, format after edits, get pinged when it's done                                                                           |
+| **Memory**           | Facts the agent saves about you and your projects; each new session starts with the relevant ones                                                                             |
+| **Experimental**     | Switches for what upstream ships turned off: computer use, code mode, background subagents, plan mode, LSP tool, Exa and Parallel web search                                  |
+
+<details>
+<summary><b>See every tab</b></summary>
+<br>
+
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshots/agents.png" alt="Agents tab with templates: Security Auditor, Bug Bounty Assistant, Code Reviewer, Debugger, Test Writer, Architect, Docs Writer" width="100%"></td>
+<td width="50%"><img src="assets/screenshots/permissions.png" alt="Permissions tab with Read-only audit, Safe, Balanced and Full auto presets" width="100%"></td>
+</tr>
+<tr>
+<td><img src="assets/screenshots/scheduled.png" alt="Scheduled tab for prompts that run at set times, with tray and start-at-sign-in options" width="100%"></td>
+<td><img src="assets/screenshots/hooks.png" alt="Hooks tab with templates: block destructive commands, notify when the agent finishes, format files after edits, log every shell command" width="100%"></td>
+</tr>
+<tr>
+<td><img src="assets/screenshots/mcp-servers.png" alt="MCP Servers tab with Playwright, Context7, GitHub, Filesystem and Sequential Thinking templates" width="100%"></td>
+<td><img src="assets/screenshots/commands.png" alt="Commands tab with /review, /audit, /tests, /explain, /commit and /fix templates" width="100%"></td>
+</tr>
+<tr>
+<td><img src="assets/screenshots/memory.png" alt="Memory tab with the Auto memory switch and saved facts" width="100%"></td>
+<td><img src="assets/screenshots/system-prompt.png" alt="System prompt tab listing the build and plan agents and the built-in prompts for Claude, GPT and Codex" width="100%"></td>
+</tr>
+<tr>
+<td><img src="assets/screenshots/opencode-account.png" alt="OpenCode Account tab: sign in, switch accounts, and see that free models need no sign-in" width="100%"></td>
+<td></td>
+</tr>
+</table>
+
+</details>
+
+## Built to be quick
+
+<img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Travel%20and%20places/High%20Voltage.png" alt="" width="40" align="right">
+
+Most of the time an agent spends is waiting on the model, so the wins come from making fewer round trips.
+
+- **Type while it works.** Messages you send mid-run reach the agent on its next step instead of waiting for the run to finish.
+- **Long commands don't block.** Dev servers and builds run in the background and wake the agent when they finish or print what it's waiting for.
+- **Computer use skips the busywork.** In our own sessions, about 60 of 222 computer-use calls were nothing but "take a screenshot" right after a click. That screenshot now comes back with the action. Typing went from 15.3 ms to 6.7 ms per character.
+- **Code mode** (Experimental) lets the model chain several tools in one short script instead of one call at a time.
+
 ## OpenCode vs OpenCode Mod
 
-|                                         | OpenCode desktop       | **OpenCode Mod**             |
-| --------------------------------------- | ---------------------- | ---------------------------- |
-| Sign in to OpenCode accounts            | CLI only               | ✅ In the app, multi-account |
-| Free-tier usage, IP and reset timer     | —                      | ✅                           |
-| Edit system prompts per agent           | JSON files             | ✅ Editor + GitHub compare   |
-| Create and edit agents                  | JSON / Markdown files  | ✅ Forms + templates         |
-| Permission presets                      | JSON files             | ✅ One click                 |
-| Manage MCP servers                      | JSON files             | ✅ Forms + templates         |
-| Custom slash commands                   | JSON files             | ✅ Forms + templates         |
-| Experimental engine features            | Environment variables  | ✅ Toggles                   |
-| Edit a connected custom provider        | Delete and re-add      | ✅ Edit in place             |
-| Settings stay open while you edit       | Close on outside click | ✅ Close button only         |
-| Same config, CLI and free models        | ✅                     | ✅                           |
-| Auto-updates                            | ✅                     | ✅                           |
-| Runs side by side with the official app | —                      | ✅                           |
+|                                        | OpenCode desktop      | **OpenCode Mod**               |
+| -------------------------------------- | --------------------- | ------------------------------ |
+| Computer use (Windows apps)            | No                    | ✅ Free, per-app approval      |
+| Every free model in the picker         | Some hidden           | ✅ All of them, refreshed live |
+| Free-tier usage, IP and reset timer    | No                    | ✅                             |
+| Scheduled prompts, tray, notifications | No                    | ✅                             |
+| Hooks on agent events                  | Code plugins          | ✅ Shell commands, templates   |
+| Memory across sessions                 | No                    | ✅                             |
+| Sign in and switch OpenCode accounts   | CLI only              | ✅ In the app, several at once |
+| Agents, permissions, MCP, commands     | JSON files            | ✅ Forms and templates         |
+| Edit system prompts                    | Config files          | ✅ Editor, GitHub's latest     |
+| Experimental engine features           | Environment variables | ✅ Switches                    |
+| Same config, CLI and free models       | ✅                    | ✅                             |
+| Auto-updates                           | ✅                    | ✅ From this repo              |
 
 ## Install
 
-1. **[Download `opencode-mod-win-x64.exe`](https://github.com/Subhashis360/opencode-mod/releases/latest/download/opencode-mod-win-x64.exe)** from the latest release.
-2. Run it and pick an install folder.
-3. Open **OpenCode Mod** from the Start menu or desktop, then go to **Settings → Mod**.
+<img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Objects/Package.png" alt="" width="40" align="right">
 
-**Requirements:** Windows 10 or 11 (64-bit). macOS and Linux can be built from source, but are not tested yet.
+1. **[Download `opencode-mod-win-x64.exe`](https://github.com/Subhashis360/opencode-mod/releases/latest/download/opencode-mod-win-x64.exe)**
+2. Run it and pick a folder.
+3. Open **OpenCode Mod**, pick a free model and start. Everything else is under **Settings → Mod**.
 
-**Updates** are checked every 10 minutes and from **Settings → General → Check for updates**; the app asks before restarting to install one.
-
-## A tour of Settings → Mod
-
-| Tab                  | What you can do                                                                               |
-| -------------------- | --------------------------------------------------------------------------------------------- |
-| **OpenCode Account** | Add accounts with a sign-in code, switch account or org, sign out; see what your chats use    |
-| **Session limits**   | Free-tier status, public IP, reset countdown, usage per model, 7-day history, estimated limit |
-| **Agents**           | Create, edit, enable and delete agents; start from 7 templates                                |
-| **System prompt**    | Per-agent prompts, the 9 built-in prompts, GitHub's latest versions, your own prompt library  |
-| **Permissions**      | Four presets and per-tool Allow / Ask / Deny                                                  |
-| **MCP Servers**      | Local and remote servers, environment variables, headers, timeouts, templates                 |
-| **Commands**         | `/name` prompt templates with arguments, shell output and file attachments                    |
-| **Experimental**     | Engine feature toggles, shell timeout and output token limit (applied after a restart)        |
+Windows 10 or 11, 64-bit. It checks for updates every 10 minutes and asks before restarting. macOS and Linux build from source but aren't tested yet.
 
 ## FAQ
 
 <details>
+<summary><b>Is computer use really free?</b></summary>
+
+Yes, with OpenCode's free models. They have a daily limit per public IP, which you can watch in Session limits. With your own Claude, OpenAI or Gemini key you pay that provider's normal API price, nothing to us.
+
+</details>
+
+<details>
+<summary><b>Will the agent take over my mouse?</b></summary>
+
+`click_element` and `read_window` work through Windows accessibility, so they leave your cursor alone. Clicking at a screen position, typing, scrolling and dragging do use the real mouse and keyboard, so let it finish those before you grab the mouse.
+
+</details>
+
+<details>
+<summary><b>Is it safe to let an AI use my computer?</b></summary>
+
+It asks before it touches each app for the first time, and you can deny. It can't type into terminals or IDEs (only plain clicks), can't control OpenCode Mod itself, and is told never to enter passwords or payment details. It's still an experimental feature: keep it away from anything you can't undo.
+
+</details>
+
+<details>
 <summary><b>Is this the official OpenCode app?</b></summary>
 
-No. OpenCode Mod is an unofficial community build of the open-source [OpenCode](https://github.com/anomalyco/opencode) desktop app, which is MIT licensed. It is not affiliated with or endorsed by the OpenCode team.
+No. It's an unofficial community build of the open-source <a href="https://github.com/anomalyco/opencode">OpenCode</a> desktop app (MIT). Not affiliated with or endorsed by the OpenCode team.
 
 </details>
 
 <details>
-<summary><b>Will it replace or break my OpenCode install?</b></summary>
+<summary><b>Will it break my OpenCode install?</b></summary>
 
-No. It has its own install folder, app data, shortcuts, Windows app id and `opencode-mod://` links. Both apps can be installed and running at the same time.
-
-</details>
-
-<details>
-<summary><b>Do my settings carry over?</b></summary>
-
-Yes. Both apps and the `opencode` CLI share the configuration in `~/.config/opencode` and your OpenCode sign-ins, so agents, providers, MCP servers and commands appear in both.
+No. It has its own install folder, app data, shortcuts and `opencode-mod://` links. Both can run at the same time, and both read the same `~/.config/opencode`, so your agents, providers and MCP servers show up in each.
 
 </details>
 
 <details>
-<summary><b>How does the OpenCode free tier limit work?</b></summary>
+<summary><b>Where do my API keys go?</b></summary>
 
-OpenCode's gateway counts requests to its free models **per public IP address per UTC day** and resets at midnight UTC. It does not publish the exact limit. The **Session limits** tab shows your usage from this machine, the IP it is counted against, the reset time, and an estimate based on the last day you hit the limit. Other devices on the same network share the same limit.
-
-</details>
-
-<details>
-<summary><b>Where are my API keys stored? Is it safe?</b></summary>
-
-Exactly where OpenCode stores them, on your machine. The mod adds no telemetry or servers of its own; the only extra network calls are a public-IP lookup (api64.ipify.org) when you open Session limits and GitHub when you check for newer system prompts or updates. All source code is in this repository.
-
-</details>
-
-<details>
-<summary><b>Why does a chat work when no account is signed in?</b></summary>
-
-OpenCode's free models need no sign-in, and providers you connect use their own API keys or sign-ins. **Settings → Mod → OpenCode Account** lists exactly what your chats use.
-
-</details>
-
-<details>
-<summary><b>Does it support macOS or Linux?</b></summary>
-
-Releases are Windows-only for now. The app is cross-platform Electron, so it can be built from source on macOS and Linux, but those builds are not tested yet.
+Where OpenCode keeps them, on your machine. The mod adds no telemetry and no servers. The only extra network calls are a public-IP lookup (api64.ipify.org) when you open Session limits, and GitHub when you check for newer prompts or updates.
 
 </details>
 
@@ -215,72 +211,60 @@ Releases are Windows-only for now. The app is cross-platform Electron, so it can
 <details>
 <summary><b>Build from source</b></summary>
 
-Requirements: [Bun](https://bun.sh) (the version in the root `package.json`), Git, Windows 10/11.
+Needs [Bun](https://bun.sh) (version in the root `package.json`), Git and Windows 10/11.
 
 ```bash
 bun install --ignore-scripts
 bun run --cwd packages/desktop package:mod
 ```
 
-The installer is written to `packages/desktop/dist/`. `--ignore-scripts` skips a native module (`tree-sitter-powershell`) that needs Visual Studio build tools and is not used by the desktop app.
+The installer lands in `packages/desktop/dist/`. `--ignore-scripts` skips `tree-sitter-powershell`, a native module that needs Visual Studio build tools and isn't used by the desktop app.
 
 </details>
 
 <details>
 <summary><b>Release a new version</b></summary>
 
-Needs the [GitHub CLI](https://cli.github.com) signed in with access to this repository.
+Needs the [GitHub CLI](https://cli.github.com) signed in with access to this repo.
 
-1. Add a `## <upstream version>` section to [MOD-CHANGELOG.md](MOD-CHANGELOG.md) if there is none.
+1. Add a `## <upstream version>` section to [MOD-CHANGELOG.md](MOD-CHANGELOG.md) if there isn't one.
 2. Run `bun run --cwd packages/desktop release:mod`.
 
-It builds the installer and publishes the installer, its blockmap and `latest.yml` as a GitHub release, which installed copies pick up automatically.
-
-Mod versions are `major.minor.(patch × 100 + revision)`: `1.18.2900` is upstream 1.18.29 with mod revision 0, the next mod-only release is `1.18.2901`, and upstream 1.18.30 becomes `1.18.3000`.
+It builds the installer and publishes it with its blockmap and `latest.yml`, which installed copies pick up on their own. Versions are `major.minor.(patch × 100 + revision)`: `1.18.2900` is upstream 1.18.29, mod revision 0.
 
 </details>
 
 <details>
-<summary><b>Repository history and staying in sync with OpenCode</b></summary>
+<summary><b>Repo layout and upstream sync</b></summary>
 
-GitHub shows the mod's own history: one commit importing upstream OpenCode, then the mod's commits. Upstream's full history and contributors stay in [anomalyco/opencode](https://github.com/anomalyco/opencode).
+GitHub shows one commit importing upstream OpenCode, then the mod's own commits. Development happens on a local `opencode-mod` branch that keeps upstream's full history, and `script/mod-publish.ts` copies new commits onto the published branch.
 
-Development happens on a local `opencode-mod` branch that keeps upstream's full history, so OpenCode updates merge normally:
-
-```bash
-git remote add upstream https://github.com/anomalyco/opencode.git
-git fetch upstream
-git merge upstream/dev
-bun script/mod-publish.ts
-git push mod mod-public:main
-```
-
-`script/mod-publish.ts` copies new commits onto the published branch, turns each upstream merge into one "Sync with OpenCode x.y.z" commit, and refuses to update if the files would differ. The mod does not ship upstream's GitHub workflows, so keep any `.github/workflows/` conflict deleted with `git rm <file>`.
-
-| Area                  | Files                                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Mod settings tabs     | `packages/app/src/components/settings-v2/mod/`                                                                     |
-| Mod strings           | `packages/app/src/i18n/mod.ts`                                                                                     |
-| Mod server routes     | `packages/opencode/src/mod/`, `packages/opencode/src/server/routes/instance/httpapi/{groups,handlers}/global.ts`   |
-| Provider editing      | `packages/app/src/components/dialog-custom-provider*.ts(x)`, `settings-providers.tsx`, `settings-v2/providers.tsx` |
-| Separate app identity | `packages/desktop/electron-builder.config.ts`, `packages/desktop/src/main/{constants,index,migrate,mod-flags}.ts`  |
-| Build and release     | `packages/desktop/scripts/{mod,utils,prebuild,predev}.ts`, `script/mod-publish.ts`                                 |
+| Area                  | Files                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| Mod settings tabs     | `packages/app/src/components/settings-v2/mod/`                                        |
+| Mod strings           | `packages/app/src/i18n/mod.ts`                                                        |
+| Computer use          | `packages/opencode/src/tool/computer.ts`, `packages/opencode/src/computer/`           |
+| Mod server routes     | `packages/opencode/src/mod/`, `packages/opencode/src/server/routes/instance/httpapi/` |
+| Separate app identity | `packages/desktop/electron-builder.config.ts`, `packages/desktop/src/main/`           |
+| Build and release     | `packages/desktop/scripts/{mod,utils,prebuild}.ts`, `script/mod-publish.ts`           |
 
 </details>
 
 ## Contributing
 
-Bug reports, feature ideas and pull requests are welcome. Open an [issue](https://github.com/Subhashis360/opencode-mod/issues) describing what you would like to change. Changes to OpenCode itself are best sent upstream to [anomalyco/opencode](https://github.com/anomalyco/opencode).
+Issues and pull requests are welcome. [Open an issue](https://github.com/Subhashis360/opencode-mod/issues) with what you'd like to change. Changes to OpenCode itself belong upstream at [anomalyco/opencode](https://github.com/anomalyco/opencode).
 
 ## Credits and license
 
-OpenCode Mod is built on [OpenCode](https://github.com/anomalyco/opencode), © opencode and its contributors, used under the [MIT License](../LICENSE). OpenCode Mod is not affiliated with or endorsed by the OpenCode team.
+Built on [OpenCode](https://github.com/anomalyco/opencode), © opencode and its contributors, under the [MIT License](../LICENSE). Animated emoji are Microsoft's [Fluent Emoji](https://github.com/microsoft/fluentui-emoji), animated set via [Animated Fluent Emojis](https://github.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis). OpenCode Mod is not affiliated with or endorsed by the OpenCode team, Anthropic or OpenAI.
 
 <div align="center">
 <br>
 
-**If OpenCode Mod saves you time, a ⭐ helps other developers find it.**
+<img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Travel%20and%20places/Glowing%20Star.png" alt="" width="36">
 
-<sub>Keywords: OpenCode desktop app · AI coding agent · AI coding assistant for Windows · OpenCode GUI · MCP server manager · custom AI agents · system prompt editor · OpenCode free tier limit · OpenCode Zen · Claude, GPT, Gemini and local models</sub>
+**If it saved you $20 this month, a star helps other people find it.**
+
+<sub>OpenCode Mod: free AI coding agent for Windows · free computer use AI agent · free alternative to Claude computer use and ChatGPT agent · OpenCode desktop GUI · OpenCode free models without API key · MCP server manager · custom AI agents · scheduled AI tasks · AI automation for Windows desktop apps</sub>
 
 </div>
