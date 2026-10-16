@@ -90,6 +90,22 @@ describe.skipIf(!ComputerDriver.supported())("tool.computer", () => {
   )
 
   it.instance(
+    "attaches a screenshot after a screen-changing action unless told not to",
+    () =>
+      Effect.gen(function* () {
+        asked.length = 0
+        const auto = yield* exec({ action: "wait", duration: 0 })
+        expect(auto.attachments).toHaveLength(1)
+        expect(asked).toEqual([["screen"]])
+        const skipped = yield* exec({ action: "wait", duration: 0, screenshot_after: false })
+        expect(skipped.attachments).toBeUndefined()
+        const reading = yield* exec({ action: "cursor_position" })
+        expect(reading.attachments).toBeUndefined()
+      }),
+    TIMEOUT,
+  )
+
+  it.instance(
     "rejects malformed coordinates",
     () =>
       Effect.gen(function* () {

@@ -29,6 +29,7 @@ namespace OpencodeComputer {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern short VkKeyScan(char ch);
     [DllImport("user32.dll")] static extern short GetKeyState(int key);
+    [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint ms);
 
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int X; public int Y; }
     [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
@@ -59,6 +60,9 @@ namespace OpencodeComputer {
 
     public static void Run() {
       try { if (!SetProcessDpiAwarenessContext(new IntPtr(-4))) SetProcessDPIAware(); } catch { SetProcessDPIAware(); }
+      // Without this Windows rounds every Sleep up to its 15.6 ms tick, so the 6 ms pause per typed character
+      // really took ~16 ms and every click and drag waited longer than intended.
+      timeBeginPeriod(1);
       var utf8 = new UTF8Encoding(false);
       var input = new StreamReader(Console.OpenStandardInput(), utf8);
       var output = new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true };
@@ -104,6 +108,7 @@ namespace OpencodeComputer {
           return Window(GetAncestor(WindowFromPoint(p), 2));
         }
         case "elements": return Elements(r);
+        case "invoke": return Invoke(r);
         case "clipboard_get": return Clipboard.ContainsText() ? Clipboard.GetText() : "";
         case "clipboard_set": {
           var text = Str(r, "text");
@@ -354,6 +359,49 @@ namespace OpencodeComputer {
       }
       return new Dictionary<string, object> { { "window", Window(hwnd) }, { "elements", items.ToArray() }, { "truncated", truncated } };
     }
+
+    // Activates the control at a point through its accessibility patterns, so the cursor never moves and the
+    // user keeps their mouse. Returns invoked=false when nothing there can be activated this way.
+    static object Invoke(Dictionary<string, object> r) {
+      int x = Int(r, "x"), y = Int(r, "y");
+      object result = null;
+      Exception failure = null;
+      var worker = new Thread(() => { try { result = Activate(x, y); } catch (Exception error) { failure = error; } });
+      worker.IsBackground = true;
+      worker.SetApartmentState(ApartmentState.MTA);
+      worker.Start();
+      if (!worker.Join(Int(r, "timeout", 4000))) throw new Exception("Activating this control took too long");
+      if (failure != null) throw failure;
+      return result;
+    }
+
+    static object Activate(int x, int y) {
+      var node = AutomationElement.FromPoint(new System.Windows.Point(x, y));
+      for (var depth = 0; node != null && depth < 5; depth++) {
+        object pattern;
+        if (node.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) {
+          ((InvokePattern)pattern).Invoke();
+          return Activated("invoke");
+        }
+        if (node.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) {
+          ((TogglePattern)pattern).Toggle();
+          return Activated("toggle");
+        }
+        if (node.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern)) {
+          ((SelectionItemPattern)pattern).Select();
+          return Activated("select");
+        }
+        if (node.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern)) {
+          var expand = (ExpandCollapsePattern)pattern;
+          if (expand.Current.ExpandCollapseState == ExpandCollapseState.Expanded) expand.Collapse(); else expand.Expand();
+          return Activated("expand");
+        }
+        node = TreeWalker.ControlViewWalker.GetParent(node);
+      }
+      return new Dictionary<string, object> { { "invoked", false } };
+    }
+
+    static object Activated(string via) { return new Dictionary<string, object> { { "invoked", true }, { "via", via } }; }
 
     static object Open(string name) {
       if (string.IsNullOrWhiteSpace(name)) throw new Exception("An application name is required");

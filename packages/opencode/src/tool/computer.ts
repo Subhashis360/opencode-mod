@@ -60,7 +60,8 @@ const Step = Schema.Struct(StepFields)
 export const Parameters = Schema.Struct({
   ...StepFields,
   screenshot_after: Schema.optional(Schema.Boolean).annotate({
-    description: "Attach a screenshot of the current display after the action(s), saving a separate call",
+    description:
+      "Attach a screenshot of the current display after the action(s). Defaults to true when the last step changes the screen (clicks, drag, scroll, key, type, wait, open_application); set false to skip it",
   }),
   actions: Schema.optional(Schema.Array(Step)).annotate({
     description: "Run several steps in order in one call. When set, the top-level action is run first",
@@ -105,6 +106,22 @@ const TERMINALS = new Set([
   "goland64",
 ])
 const POINTER_ONLY: Action[] = ["left_click", "scroll", "mouse_move", "double_click"]
+// The model nearly always looked again after these, spending a whole turn on a bare screenshot call,
+// so the screenshot comes back with the action unless it opts out.
+const CHANGES_SCREEN = new Set<Action>([
+  "left_click",
+  "right_click",
+  "middle_click",
+  "double_click",
+  "triple_click",
+  "left_click_drag",
+  "scroll",
+  "key",
+  "type",
+  "hold_key",
+  "wait",
+  "open_application",
+])
 const INTERACTIVE = new Set([
   "button",
   "checkbox",
@@ -320,8 +337,15 @@ export const ComputerTool = Tool.define(
                     `No element matching "${step.text}" in ${describe(result.window)}; try read_window or a screenshot`,
                   )
                 await guard("left_click", result.window)
+                // Accessibility activation leaves the user's cursor alone; a real click is only the fallback.
+                const activated = await ComputerDriver.call<{ invoked: boolean; via?: string }>(
+                  "invoke",
+                  { x: element.x, y: element.y },
+                  6_000,
+                ).catch(() => ({ invoked: false, via: undefined }))
+                if (activated.invoked) return `activated ${line(element, screen)} (${activated.via}, cursor not moved)`
                 await ComputerDriver.call("click", { x: element.x, y: element.y, button: "left", count: 1 })
-                return `clicked ${line(element, screen)}`
+                return `clicked ${line(element, screen)} (no accessible action, used the mouse)`
               }
               case "mouse_move": {
                 const point = toPhysical(display, step.coordinate)
@@ -430,7 +454,10 @@ export const ComputerTool = Tool.define(
                 return steps.length > 1 ? `step ${i + 1} (${step.action}) failed: ${result.error}` : result.error
               output.push(steps.length > 1 ? `${i + 1}. ${result.text}` : result.text)
             }
-            if (params.screenshot_after && steps.at(-1)?.action !== "screenshot") {
+            const last = steps.at(-1)!.action
+            if ((params.screenshot_after ?? CHANGES_SCREEN.has(last)) && last !== "screenshot") {
+              await ask(["screen"], { action: "screenshot" }).catch(() => {})
+              if (rejection) return "rejected"
               await new Promise((resolve) => setTimeout(resolve, 150))
               const { display, index } = await target(ctx.sessionID)
               const shot = await capture(display)
