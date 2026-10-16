@@ -137,6 +137,9 @@ const INTERACTIVE = new Set([
 ])
 
 const current = new Map<string, number>()
+// The app window each session last worked in. read_window and click_element go there by default, because
+// the foreground window is usually the OpenCode chat the user is watching.
+const workingIn = new Map<string, number>()
 let displays: { list: Display[]; at: number } | undefined
 
 async function screens(refresh = false) {
@@ -243,15 +246,22 @@ export const ComputerTool = Tool.define(
                 throw error
               })
 
+          const own = (window: WindowInfo) =>
+            /opencode/.test(window.process.toLowerCase()) || window.pid === process.pid || window.pid === process.ppid
           const guard = async (action: Action, window: WindowInfo | null, modifiers?: string) => {
             if (!window) return ask(["screen"], { action })
             const app = window.process.toLowerCase()
-            if (/opencode/.test(app) || window.pid === process.pid || window.pid === process.ppid)
-              throw new Error("OpenCode cannot control its own window")
+            if (own(window))
+              throw new Error(
+                action === "type" || action === "key" || action === "hold_key"
+                  ? "OpenCode is the focused window, so keys would go into it. Click the field in the app first, in the same call: actions [left_click, type]"
+                  : "OpenCode cannot control its own window",
+              )
             if (TERMINALS.has(app) && (!POINTER_ONLY.includes(action) || modifiers))
               throw new Error(
                 `${window.process} is a terminal or IDE: only plain clicks and scrolling are allowed there. Use the shell or edit tools instead`,
               )
+            workingIn.set(ctx.sessionID, window.hwnd)
             return ask([app], { action, app: window.process, title: window.title })
           }
 
@@ -304,7 +314,14 @@ export const ComputerTool = Tool.define(
               case "click_element": {
                 await ask(["screen"], { action })
                 if (action === "click_element" && !step.text) throw new Error("click_element needs text to find")
-                const source = step.coordinate ? { source: "point", ...toPhysical(display, step.coordinate) } : {}
+                const source = step.coordinate
+                  ? { source: "point", ...toPhysical(display, step.coordinate) }
+                  : {
+                      source: "app",
+                      hwnd: workingIn.get(ctx.sessionID),
+                      skip: "opencode",
+                      pids: `${process.pid},${process.ppid}`,
+                    }
                 const result = await ComputerDriver.call<{
                   window: WindowInfo | null
                   elements: Element[]
@@ -314,6 +331,7 @@ export const ComputerTool = Tool.define(
                   { ...source, query: step.text ?? "", limit: action === "click_element" ? 400 : READ_LIMIT },
                   10_000,
                 )
+                if (result.window && !own(result.window)) workingIn.set(ctx.sessionID, result.window.hwnd)
                 const list = await screens()
                 const home = list.findIndex(
                   (item) => result.elements[0] && contains(item, result.elements[0].x, result.elements[0].y),
@@ -337,13 +355,19 @@ export const ComputerTool = Tool.define(
                     `No element matching "${step.text}" in ${describe(result.window)}; try read_window or a screenshot`,
                   )
                 await guard("left_click", result.window)
-                // Accessibility activation leaves the user's cursor alone; a real click is only the fallback.
+                // Accessibility activation works on the app's own control tree, so it leaves the user's cursor
+                // alone and works even when the app is behind other windows. A real click is only the fallback.
                 const activated = await ComputerDriver.call<{ invoked: boolean; via?: string }>(
                   "invoke",
-                  { x: element.x, y: element.y },
+                  { x: element.x, y: element.y, hwnd: result.window?.hwnd, name: element.name },
                   6_000,
                 ).catch(() => ({ invoked: false, via: undefined }))
                 if (activated.invoked) return `activated ${line(element, screen)} (${activated.via}, cursor not moved)`
+                const top = await at(element.x, element.y)
+                if (result.window && top?.hwnd !== result.window.hwnd)
+                  throw new Error(
+                    `"${element.name}" has no accessible action and ${describe(top)} covers it, so a mouse click would hit that instead. Ask the user to bring ${describe(result.window)} to the front, or use a screenshot`,
+                  )
                 await ComputerDriver.call("click", { x: element.x, y: element.y, button: "left", count: 1 })
                 return `clicked ${line(element, screen)} (no accessible action, used the mouse)`
               }
@@ -426,6 +450,8 @@ export const ComputerTool = Tool.define(
                 if (!step.text) throw new Error("open_application needs the app name in text")
                 await ask([`open:${step.text.toLowerCase()}`], { action, app: step.text })
                 const opened = await ComputerDriver.call<string>("open", { name: step.text })
+                // The new app opens on top, so the next read should go to it rather than the previous app.
+                workingIn.delete(ctx.sessionID)
                 return `opened ${opened}`
               }
               case "read_clipboard": {

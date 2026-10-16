@@ -1,10 +1,10 @@
 Controls the user's desktop: sees the screen, moves and clicks the mouse, types, presses keys, scrolls, opens apps and uses the clipboard. Use it for native apps and anything outside the project files; prefer the shell, edit and webfetch tools when they can do the job.
 
-Work cheaply and quickly:
-- Prefer read_window over screenshot. It returns the focused window's controls as text lines like `button "Save" @412,88` with click coordinates, at a fraction of a screenshot's cost. Pass text to filter it (e.g. text "Save"), or coordinate to read the window under that point.
-- click_element activates the control whose name best matches text in the focused window, with no screenshot needed. It works through accessibility without moving the user's mouse, and only falls back to a real click when the control offers no accessible action, so prefer it over coordinate clicks.
-- Take a screenshot only when read_window shows nothing useful (games, canvases, images, some custom UIs) or to check visual state. Use zoom with region [x0, y0, x1, y1] to read small details.
-- Every model turn costs seconds, far more than any action, so do as much as possible per call. Batch predictable steps with actions: [...] (run in order, stopping at the first failure), e.g. click a field, type, press Return in one call.
+Work cheaply and quickly. Every model turn costs several seconds, far more than any action, so the fastest run is the one with the fewest calls:
+- Start with read_window. It returns the app's controls as text lines like `button "Save" @412,88`, at a fraction of a screenshot's cost. It reads the app you are working in (the last app you clicked, typed into or opened), even when OpenCode is in front or the app is on another display. Pass text to filter it (e.g. text "Save"), or coordinate to read the window under that point.
+- Then use click_element (text) for buttons, checkboxes, tabs, menu and list items. It presses the control through accessibility in the background: the user's mouse does not move and the app does not have to be in front. Prefer it to coordinate clicks whenever read_window lists the control.
+- Batch everything you can predict with actions: [...] (run in order, stopping at the first failure). E.g. several click_element steps in one call, or left_click a field + type + key "Return". One call with five steps is five times faster than five calls.
+- Take a screenshot only when read_window shows nothing useful (games, canvases, web pages, chat lists and other custom-drawn UIs) or to check visual state. Use zoom with region [x0, y0, x1, y1] to read small details.
 - Clicks, drag, scroll, key, type, wait and open_application return a fresh screenshot automatically. Never follow them with a separate screenshot call; set screenshot_after: false only when you will not need to look before your next call.
 
 Coordinates:
@@ -22,5 +22,5 @@ Rules:
 - The user approves each app the first time it is controlled. If they deny, stop and ask them what to do.
 - Terminals and IDEs accept plain clicks and scrolling only; run commands with the shell tool instead.
 - OpenCode's own window cannot be controlled.
-- Typing goes to the focused window: click the target field first. After an action that changes the screen, check the returned screenshot (or read_window) before continuing.
+- Typing and keys go to the focused window, which is often OpenCode while the user watches: click the target field first, in the same call as the typing. After an action that changes the screen, check the returned screenshot (or read_window) before continuing.
 - Never enter passwords, payment details or other secrets, and never complete CAPTCHAs; ask the user to do those steps.

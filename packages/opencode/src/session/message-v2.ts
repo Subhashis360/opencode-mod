@@ -135,6 +135,23 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
+  // Computer use attaches a screenshot to most actions, and every one stays in the history, so each turn
+  // re-sends and re-reads all of them and gets slower. Only the newest few reach the model. Older ones are
+  // dropped in batches so the history prefix stays the same for several turns and prompt caches still hit.
+  const KEEP_SCREENSHOTS = 3
+  const DROP_BATCH = 5
+  const screenshots = input.flatMap((msg) =>
+    msg.parts.flatMap((part) =>
+      part.type === "tool" &&
+      part.tool === "computer" &&
+      part.state.status === "completed" &&
+      part.state.attachments?.some((a) => isMedia(a.mime))
+        ? [part.id]
+        : [],
+    ),
+  )
+  const excess = Math.max(0, screenshots.length - KEEP_SCREENSHOTS)
+  const staleScreenshots = new Set(screenshots.slice(0, excess - (excess % DROP_BATCH)))
   // Track media from tool results that need to be injected as user messages
   // for providers that don't support that media type in tool results.
   //
@@ -290,10 +307,13 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         if (part.type === "tool") {
           toolNames.add(part.tool)
           if (part.state.status === "completed") {
+            const stale = staleScreenshots.has(part.id)
             const outputText = part.state.time.compacted
               ? "[Old tool result content cleared]"
-              : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
-            const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
+              : truncateToolOutput(part.state.output, options?.toolOutputMaxChars) +
+                (stale ? "\n[older screenshot removed]" : "")
+            const attachments =
+              part.state.time.compacted || options?.stripMedia || stale ? [] : (part.state.attachments ?? [])
 
             // For providers that don't support media in tool results, extract media files
             // (images, PDFs) to be sent as a separate user message

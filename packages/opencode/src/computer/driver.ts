@@ -10,7 +10,7 @@ import HELPER from "./windows-helper.txt"
 // once (~1s) and then answers each request over stdin/stdout in a few milliseconds.
 
 export type Display = { x: number; y: number; width: number; height: number; primary: boolean; name: string }
-export type WindowInfo = { pid: number; process: string; title: string }
+export type WindowInfo = { hwnd: number; pid: number; process: string; title: string }
 export type Element = {
   type: string
   name: string

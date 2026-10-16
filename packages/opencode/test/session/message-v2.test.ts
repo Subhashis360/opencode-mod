@@ -411,6 +411,56 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("keeps only the newest computer-use screenshots, dropping older ones in batches", async () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+    const shot = (i: number) =>
+      ({
+        ...basePart(assistantID, `shot-${i}`),
+        type: "tool",
+        callID: `call-${i}`,
+        tool: "computer",
+        state: {
+          status: "completed",
+          input: { action: "left_click" },
+          output: `click ${i}`,
+          title: "left_click",
+          metadata: {},
+          time: { start: i, end: i + 1 },
+          attachments: [
+            {
+              ...basePart(assistantID, `file-${i}`),
+              type: "file",
+              mime: "image/jpeg",
+              url: "data:image/jpeg;base64,Zm9v",
+            },
+          ],
+        },
+      }) as SessionV1.Part
+    const results = async (count: number) => {
+      const input: SessionV1.WithParts[] = [
+        {
+          info: userInfo(userID),
+          parts: [{ ...basePart(userID, "u1"), type: "text", text: "go" }] as SessionV1.Part[],
+        },
+        { info: assistantInfo(assistantID, userID), parts: Array.from({ length: count }, (_, i) => shot(i)) },
+      ]
+      const messages = await MessageV2.toModelMessages(input, model)
+      return messages
+        .filter((m) => m.role === "tool")
+        .flatMap((m) => m.content as Array<{ output: { type: string; value: unknown } }>)
+        .map((part) => (part.output.type === "content" ? "image" : String(part.output.value)))
+    }
+
+    // Up to 3 + 4 screenshots nothing is dropped, so the history (and any prompt cache) stays put.
+    expect(await results(7)).toEqual(Array(7).fill("image"))
+    // At 8 the oldest 5 go at once and the newest 3 stay.
+    expect(await results(8)).toEqual([
+      ...Array.from({ length: 5 }, (_, i) => `click ${i}\n[older screenshot removed]`),
+      ...Array(3).fill("image"),
+    ])
+  })
+
   test("preserves jpeg tool-result media for anthropic models", async () => {
     const anthropicModel: Provider.Model = {
       ...model,
