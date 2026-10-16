@@ -2104,6 +2104,19 @@ export type ModUpstreamPrompts = {
   }
 }
 
+export type ModAccount = {
+  id: string
+  label: string
+  kind: "api" | "oauth" | "wellknown"
+  added: number
+  active: boolean
+  limitedUntil?: number
+}
+
+export type ModAccounts = {
+  [key: string]: Array<ModAccount>
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -7722,6 +7735,114 @@ export type GlobalModModelsRefreshResponses = {
 }
 
 export type GlobalModModelsRefreshResponse = GlobalModModelsRefreshResponses[keyof GlobalModModelsRefreshResponses]
+
+export type GlobalModAccountsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/mod/accounts"
+}
+
+export type GlobalModAccountsErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalModAccountsError = GlobalModAccountsErrors[keyof GlobalModAccountsErrors]
+
+export type GlobalModAccountsResponses = {
+  /**
+   * Accounts by provider
+   */
+  200: ModAccounts
+}
+
+export type GlobalModAccountsResponse = GlobalModAccountsResponses[keyof GlobalModAccountsResponses]
+
+export type GlobalModAccountsAddData = {
+  body?: {
+    providerID: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/accounts/add"
+}
+
+export type GlobalModAccountsAddErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalModAccountsAddError = GlobalModAccountsAddErrors[keyof GlobalModAccountsAddErrors]
+
+export type GlobalModAccountsAddResponses = {
+  /**
+   * Ready
+   */
+  200: boolean
+}
+
+export type GlobalModAccountsAddResponse = GlobalModAccountsAddResponses[keyof GlobalModAccountsAddResponses]
+
+export type GlobalModAccountsSelectData = {
+  body?: {
+    providerID: string
+    accountID: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/accounts/select"
+}
+
+export type GlobalModAccountsSelectErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalModAccountsSelectError = GlobalModAccountsSelectErrors[keyof GlobalModAccountsSelectErrors]
+
+export type GlobalModAccountsSelectResponses = {
+  /**
+   * Switched
+   */
+  200: boolean
+}
+
+export type GlobalModAccountsSelectResponse = GlobalModAccountsSelectResponses[keyof GlobalModAccountsSelectResponses]
+
+export type GlobalModAccountsRemoveData = {
+  body?: {
+    providerID: string
+    accountID: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/accounts/remove"
+}
+
+export type GlobalModAccountsRemoveErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalModAccountsRemoveError = GlobalModAccountsRemoveErrors[keyof GlobalModAccountsRemoveErrors]
+
+export type GlobalModAccountsRemoveResponses = {
+  /**
+   * Removed
+   */
+  200: boolean
+}
+
+export type GlobalModAccountsRemoveResponse = GlobalModAccountsRemoveResponses[keyof GlobalModAccountsRemoveResponses]
 
 export type EventSubscribeData = {
   body?: never

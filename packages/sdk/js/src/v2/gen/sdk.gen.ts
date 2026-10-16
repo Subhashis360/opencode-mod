@@ -98,6 +98,14 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalModAccountsAddErrors,
+  GlobalModAccountsAddResponses,
+  GlobalModAccountsErrors,
+  GlobalModAccountsRemoveErrors,
+  GlobalModAccountsRemoveResponses,
+  GlobalModAccountsResponses,
+  GlobalModAccountsSelectErrors,
+  GlobalModAccountsSelectResponses,
   GlobalModFreeTierErrors,
   GlobalModFreeTierResponses,
   GlobalModModelsRefreshErrors,
@@ -1537,6 +1545,124 @@ export class Mod extends HeyApiClient {
       GlobalModModelsRefreshErrors,
       ThrowOnError
     >({ url: "/global/mod/models/refresh", ...options })
+  }
+
+  /**
+   * List provider accounts
+   *
+   * Every account added for each provider, which one is active, and which are waiting out a usage limit. Providers with a single account are not listed.
+   */
+  public accounts<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalModAccountsResponses, GlobalModAccountsErrors, ThrowOnError>({
+      url: "/global/mod/accounts",
+      ...options,
+    })
+  }
+
+  /**
+   * Start adding a provider account
+   *
+   * Keeps the provider's current account and makes the next login for it (within 15 minutes) a new account instead of a replacement.
+   */
+  public accountsAdd<ThrowOnError extends boolean = false>(
+    parameters?: {
+      providerID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "providerID" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalModAccountsAddResponses,
+      GlobalModAccountsAddErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/accounts/add",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Use a provider account
+   *
+   * Make one of a provider's accounts the active one.
+   */
+  public accountsSelect<ThrowOnError extends boolean = false>(
+    parameters?: {
+      providerID?: string
+      accountID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "providerID" },
+            { in: "body", key: "accountID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      GlobalModAccountsSelectResponses,
+      GlobalModAccountsSelectErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/accounts/select",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Remove a provider account
+   *
+   * Remove one account; removing the last one disconnects the provider.
+   */
+  public accountsRemove<ThrowOnError extends boolean = false>(
+    parameters?: {
+      providerID?: string
+      accountID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "providerID" },
+            { in: "body", key: "accountID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      GlobalModAccountsRemoveResponses,
+      GlobalModAccountsRemoveErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/accounts/remove",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
   }
 }
 

@@ -12,6 +12,7 @@ import * as ModFreeTier from "@/mod/free-tier"
 import { BUILT_IN_PROMPTS, upstreamPrompts } from "@/mod/prompts"
 import { Database } from "@opencode-ai/core/database/database"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
+import { AccountPool } from "@/auth/account-pool"
 import { randomUUID } from "node:crypto"
 import { Duration, Effect, Option, Queue } from "effect"
 import * as Stream from "effect/Stream"
@@ -26,6 +27,8 @@ import {
   GlobalAccountSwitchInput,
   GlobalConfigRemoveInput,
   GlobalUpgradeInput,
+  ModAccountAddInput,
+  ModAccountInput,
 } from "../groups/global"
 
 // Same default as `opencode account login`.
@@ -82,6 +85,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const account = yield* Account.Service
     const database = yield* Database.Service
     const modelsDev = yield* ModelsDev.Service
+    const accountPool = yield* AccountPool.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -268,6 +272,33 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return true
     })
 
+    // OpenCode Mod: provider accounts. Account data errors become 400s rather than crashes.
+    const modAccounts = Effect.fn("GlobalHttpApi.modAccounts")(function* () {
+      return yield* accountPool.list().pipe(Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))))
+    })
+    const modAccountsAdd = Effect.fn("GlobalHttpApi.modAccountsAdd")(function* (ctx: {
+      payload: typeof ModAccountAddInput.Type
+    }) {
+      yield* accountPool
+        .beginAdd(ctx.payload.providerID)
+        .pipe(Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))))
+      return true
+    })
+    const modAccountsSelect = Effect.fn("GlobalHttpApi.modAccountsSelect")(function* (ctx: {
+      payload: typeof ModAccountInput.Type
+    }) {
+      return yield* accountPool
+        .select(ctx.payload.providerID, ctx.payload.accountID)
+        .pipe(Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))))
+    })
+    const modAccountsRemove = Effect.fn("GlobalHttpApi.modAccountsRemove")(function* (ctx: {
+      payload: typeof ModAccountInput.Type
+    }) {
+      return yield* accountPool
+        .remove(ctx.payload.providerID, ctx.payload.accountID)
+        .pipe(Effect.catch(() => Effect.fail(new HttpApiError.BadRequest({}))))
+    })
+
     return handlers
       .handle("health", health)
       .handleRaw("event", event)
@@ -285,5 +316,9 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("modPrompts", modPrompts)
       .handle("modPromptsUpstream", modPromptsUpstream)
       .handle("modModelsRefresh", modModelsRefresh)
+      .handle("modAccounts", modAccounts)
+      .handle("modAccountsAdd", modAccountsAdd)
+      .handle("modAccountsSelect", modAccountsSelect)
+      .handle("modAccountsRemove", modAccountsRemove)
   }),
 )

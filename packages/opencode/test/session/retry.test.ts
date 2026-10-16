@@ -146,6 +146,71 @@ describe("session.retry.delay", () => {
       expect(attempts).toStrictEqual([1, 2, 3, 4, 5])
     }),
   )
+
+  it.instance("switches to another account at once when the active one hits a limit", () =>
+    Effect.gen(function* () {
+      const messages: string[] = []
+      const next: number[] = []
+      const switched: number[] = []
+      const limit = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
+        new SessionV1.APIError({ message: "Rate limit exceeded", statusCode: 429, isRetryable: false }).toObject(),
+      )
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: "test",
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: (info) => Effect.sync(() => (messages.push(info.message), next.push(info.next))),
+          switchAccount: (until) => Effect.sync(() => (switched.push(until), "Account 2")),
+        }),
+      )
+      const before = Date.now()
+      yield* step(limit)
+      expect(switched).toHaveLength(1)
+      // The limited account is skipped for a while; the retry itself happens right away.
+      expect(switched[0]).toBeGreaterThan(before)
+      expect(messages).toEqual(["Limit reached, switched to Account 2"])
+      expect(next[0]).toBeLessThanOrEqual(Date.now())
+    }),
+  )
+
+  it.instance("falls back to the normal retry when no other account is usable", () =>
+    Effect.gen(function* () {
+      const messages: string[] = []
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: "test",
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: (info) => Effect.sync(() => void messages.push(info.message)),
+          switchAccount: () => Effect.succeed(undefined),
+        }),
+      )
+      yield* step(apiError({ "retry-after-ms": "0" }))
+      expect(messages).toEqual(["boom"])
+    }),
+  )
+})
+
+describe("session.retry.isAccountLimit", () => {
+  const api = (input: { message: string; statusCode?: number; responseBody?: string }) =>
+    Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
+      new SessionV1.APIError({ isRetryable: false, ...input }).toObject(),
+    )
+
+  test("treats 429, 402 and quota or credit errors as account limits", () => {
+    expect(SessionRetry.isAccountLimit(api({ message: "x", statusCode: 429 }))).toBe(true)
+    expect(SessionRetry.isAccountLimit(api({ message: "x", statusCode: 402 }))).toBe(true)
+    expect(SessionRetry.isAccountLimit(api({ message: "You exceeded your current quota", statusCode: 400 }))).toBe(true)
+    expect(SessionRetry.isAccountLimit(api({ message: "credit insufficient balance: balance=0" }))).toBe(true)
+    expect(SessionRetry.isAccountLimit(api({ message: "x", responseBody: '{"type":"FreeUsageLimitError"}' }))).toBe(
+      true,
+    )
+  })
+
+  test("does not treat server errors or bad requests as account limits", () => {
+    expect(SessionRetry.isAccountLimit(api({ message: "Rate limit", statusCode: 503 }))).toBe(false)
+    expect(SessionRetry.isAccountLimit(api({ message: "Invalid model", statusCode: 400 }))).toBe(false)
+    expect(SessionRetry.isAccountLimit(wrap("Overloaded"))).toBe(false)
+  })
 })
 
 describe("session.retry.retryable", () => {

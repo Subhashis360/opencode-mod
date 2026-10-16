@@ -21,6 +21,7 @@ const SECTIONS = [
       { key: "OPENCODE_EXPERIMENTAL_CODE_MODE", kind: "toggle" },
       { key: "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS", kind: "toggle" },
       { key: "OPENCODE_EXPERIMENTAL_LSP_TOOL", kind: "toggle" },
+      { key: "OPENCODE_EXPERIMENTAL_COMPUTER_USE", kind: "toggle" },
       { key: "OPENCODE_ENABLE_EXA", kind: "toggle" },
       { key: "OPENCODE_ENABLE_PARALLEL", kind: "toggle" },
     ],

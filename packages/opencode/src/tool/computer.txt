@@ -1,0 +1,25 @@
+Controls the user's desktop: sees the screen, moves and clicks the mouse, types, presses keys, scrolls, opens apps and uses the clipboard. Use it for native apps and anything outside the project files; prefer the shell, edit and webfetch tools when they can do the job.
+
+Work cheaply and quickly:
+- Prefer read_window over screenshot. It returns the focused window's controls as text lines like `button "Save" @412,88` with click coordinates, at a fraction of a screenshot's cost. Pass text to filter it (e.g. text "Save"), or coordinate to read the window under that point.
+- click_element clicks the control whose name best matches text in the focused window, with no screenshot needed.
+- Take a screenshot only when read_window shows nothing useful (games, canvases, images, some custom UIs) or to check visual state. Use zoom with region [x0, y0, x1, y1] to read small details.
+- Batch predictable steps with actions: [...] (run in order, stopping at the first failure) and set screenshot_after: true instead of making a separate screenshot call.
+
+Coordinates:
+- All coordinates are in the screenshot frame of the current display (shown by screenshot, read_window and list_displays), not physical pixels. Display 0 is the primary; pass display to switch.
+
+Actions:
+- screenshot, zoom (region), read_window (text?, coordinate?), click_element (text), list_displays, cursor_position
+- mouse_move, left_click, right_click, middle_click, double_click, triple_click (coordinate; omit to use the cursor position; text holds modifier keys such as "shift" or "ctrl")
+- left_click_drag (start_coordinate, coordinate), left_mouse_down, left_mouse_up
+- scroll (coordinate?, scroll_direction, scroll_amount)
+- type (text), key (text: "ctrl+s", "alt+tab", "Return", or space-separated sequences like "Down Down Enter"), hold_key (text, duration)
+- wait (duration in seconds, max 10), open_application (text: app name), read_clipboard, write_clipboard (text)
+
+Rules:
+- The user approves each app the first time it is controlled. If they deny, stop and ask them what to do.
+- Terminals and IDEs accept plain clicks and scrolling only; run commands with the shell tool instead.
+- OpenCode's own window cannot be controlled.
+- Typing goes to the focused window: click the target field first. After an action that changes the screen, verify with read_window or screenshot_after before continuing.
+- Never enter passwords, payment details or other secrets, and never complete CAPTCHAs; ask the user to do those steps.

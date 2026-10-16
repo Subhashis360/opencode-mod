@@ -1199,6 +1199,8 @@ export interface Interface {
   ) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: string } | undefined>
   readonly getSmallModel: (providerID: ProviderV2.ID) => Effect.Effect<Model | undefined>
   readonly defaultModel: () => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID }, DefaultModelError>
+  /** Drops the cached providers and SDKs so the next request reads credentials again. */
+  readonly reload: () => Effect.Effect<void>
 }
 
 interface State {
@@ -2036,7 +2038,12 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel })
+    // OpenCode Mod: rebuild from the current credentials, e.g. after switching to another account.
+    const reload = Effect.fn("Provider.reload")(function* () {
+      yield* InstanceState.invalidate(state)
+    })
+
+    return Service.of({ list, getProvider, getModel, getLanguage, closest, getSmallModel, defaultModel, reload })
   }),
 )
 

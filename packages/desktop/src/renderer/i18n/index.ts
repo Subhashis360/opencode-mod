@@ -4,6 +4,9 @@ import {
   detectDesktopNativeLocale,
   type DesktopNativeLocale,
 } from "../../../../app/src/i18n/desktop-native"
+import { brandDict } from "../../../../app/src/i18n/mod-brand"
+
+const isModBuild = import.meta.env.VITE_OPENCODE_MOD === "1"
 
 import { dict as desktopEn } from "./en"
 import { dict as desktopZh } from "./zh"
@@ -184,7 +187,7 @@ const state = {
   init: undefined as Promise<Locale> | undefined,
 }
 
-state.dict = build(state.locale)
+state.dict = brandDict(build(state.locale), isModBuild)
 
 const translate = i18n.translator(() => state.dict, i18n.resolveTemplate)
 
@@ -202,7 +205,7 @@ export function initI18n(): Promise<Locale> {
     const next = pickLocale(value) ?? state.locale
 
     state.locale = next
-    state.dict = build(next)
+    state.dict = brandDict(build(next), isModBuild)
     return next
   })().catch(() => state.locale)
 

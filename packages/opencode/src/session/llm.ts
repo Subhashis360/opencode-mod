@@ -53,6 +53,8 @@ export type StreamRequest = StreamInput & {
 
 export interface Interface {
   readonly stream: (input: StreamInput) => Stream.Stream<LLMEvent, unknown>
+  /** OpenCode Mod: rebuild providers from the current credentials, e.g. after switching accounts. */
+  readonly reloadProvider?: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/LLM") {}
@@ -380,7 +382,7 @@ const live: Layer.Layer<
         ),
       )
 
-    return Service.of({ stream })
+    return Service.of({ stream, reloadProvider: () => provider.reload() })
   }),
 )
 

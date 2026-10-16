@@ -8,6 +8,7 @@ import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol, sh
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { TitlebarTheme } from "../preload/types"
+import { MOD, MOD_APP_NAME } from "./constants"
 import { exportDebugLogs, write as writeLog } from "./logging"
 import { getStore, removeStoreFile } from "./store"
 import { PINCH_ZOOM_ENABLED_KEY, WINDOW_IDS_KEY } from "./store-keys"
@@ -180,7 +181,7 @@ export function createMainWindow(id: string = randomUUID()) {
     height: state.height,
     show: false,
     autoHideMenuBar: true,
-    title: "OpenCode",
+    title: MOD ? MOD_APP_NAME : "OpenCode",
     icon: iconPath(),
     backgroundColor: backgroundColor ?? defaultBackgroundColor(),
     ...(process.platform === "darwin"
@@ -204,6 +205,8 @@ export function createMainWindow(id: string = randomUUID()) {
     },
   })
 
+  // The page's <title> is "OpenCode"; keep the mod's name in the taskbar and window switcher.
+  if (MOD) win.on("page-title-updated", (event) => event.preventDefault())
   allowRendererPermissions(win)
   wireWindowRecovery(win, id)
   wireNavigationPolicy(win)

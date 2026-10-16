@@ -154,6 +154,33 @@ export function retryable(error: Err, provider: string) {
   return undefined
 }
 
+// OpenCode Mod: errors that mean "this account is out of requests or credit", where another account
+// of the same provider can carry on. Server errors and overload are not account problems.
+const ACCOUNT_LIMIT_PATTERN =
+  /rate[ _-]?limit|too many requests|too_many_requests|usage limit|quota|insufficient[ _-]?(?:quota|balance|credit)|credit balance|out of credits|exceeded your|limit reached|FreeUsageLimitError|GoUsageLimitError/i
+
+export function isAccountLimit(error: Err) {
+  if (SessionV1.ContextOverflowError.isInstance(error)) return false
+  if (SessionV1.APIError.isInstance(error)) {
+    const status = error.data.statusCode
+    if (status === 429 || status === 402) return true
+    if (status !== undefined && status >= 500) return false
+    return ACCOUNT_LIMIT_PATTERN.test(`${error.data.message} ${error.data.responseBody ?? ""}`)
+  }
+  const message = isRecord(error.data) ? error.data.message : undefined
+  return typeof message === "string" && ACCOUNT_LIMIT_PATTERN.test(message)
+}
+
+// When the limited account can be used again: the provider's retry-after, or a default.
+function limitedUntil(error: Err, now: number) {
+  if (SessionV1.APIError.isInstance(error) && error.data.responseHeaders) {
+    const headers = error.data.responseHeaders
+    if (headers["retry-after-ms"] || headers["retry-after"]) return now + delay(1, error)
+  }
+  return now + DEFAULT_ACCOUNT_LIMIT_MS
+}
+const DEFAULT_ACCOUNT_LIMIT_MS = 60 * 60 * 1000
+
 function matchesRetryableMessage(value: unknown) {
   return typeof value === "string" && RETRYABLE_MESSAGE_PATTERNS.some((pattern) => pattern.test(value))
 }
@@ -184,26 +211,46 @@ export function policy(opts: {
   provider: string
   parse: (error: unknown) => Err
   set: (input: { attempt: number; message: string; action?: Retryable["action"]; next: number }) => Effect.Effect<void>
+  /**
+   * OpenCode Mod: the active account hit a limit; switch to another account of this provider.
+   * Returns the label of the account now in use, or nothing when no other account is usable.
+   */
+  switchAccount?: (until: number) => Effect.Effect<string | undefined>
 }) {
   return Schedule.fromStepWithMetadata(
     Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
       const error = opts.parse(meta.input)
-      const retry = retryable(error, opts.provider)
-      if (!retry) return Cause.done(meta.attempt)
-      if (meta.attempt > RETRY_MAX_RETRIES) return Cause.done(meta.attempt)
-      return Effect.gen(function* () {
-        const wait = delay(meta.attempt, SessionV1.APIError.isInstance(error) ? error : undefined)
-        const now = yield* Clock.currentTimeMillis
-        yield* opts.set({
-          attempt: meta.attempt,
-          message: retry.message,
-          action: retry.action,
-          next: now + wait,
+      if (opts.switchAccount && isAccountLimit(error)) {
+        const switchAccount = opts.switchAccount
+        return Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const label = yield* switchAccount(limitedUntil(error, now))
+          if (label === undefined) return yield* step(meta, error)
+          // Another account takes over right away; this does not count as a failed attempt.
+          yield* opts.set({ attempt: meta.attempt, message: `Limit reached, switched to ${label}`, next: now })
+          return [meta.attempt, Duration.zero] as [number, Duration.Duration]
         })
-        return [meta.attempt, Duration.millis(wait)] as [number, Duration.Duration]
-      })
+      }
+      return step(meta, error)
     }),
   )
+
+  function step(meta: Schedule.InputMetadata<unknown>, error: Err) {
+    const retry = retryable(error, opts.provider)
+    if (!retry) return Cause.done(meta.attempt)
+    if (meta.attempt > RETRY_MAX_RETRIES) return Cause.done(meta.attempt)
+    return Effect.gen(function* () {
+      const wait = delay(meta.attempt, SessionV1.APIError.isInstance(error) ? error : undefined)
+      const now = yield* Clock.currentTimeMillis
+      yield* opts.set({
+        attempt: meta.attempt,
+        message: retry.message,
+        action: retry.action,
+        next: now + wait,
+      })
+      return [meta.attempt, Duration.millis(wait)] as [number, Duration.Duration]
+    })
+  }
 }
 
 export * as SessionRetry from "./retry"

@@ -9,6 +9,7 @@ import { Installation } from "../../src/installation"
 import { Account } from "../../src/account/account"
 import { Database } from "@opencode-ai/core/database/database"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
+import { AccountPool } from "../../src/auth/account-pool"
 import {
   AccountID,
   DeviceCode,
@@ -42,6 +43,7 @@ const signedIn = new Info({
 const removed: string[] = []
 const used: [string, string | null][] = []
 const refreshes: (boolean | undefined)[] = []
+const accountCalls: string[] = []
 let polls = 0
 const accountMock = Layer.mock(Account.Service)({
   list: () => Effect.succeed([signedIn]),
@@ -84,6 +86,18 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(Layer.mock(Database.Service)({ db: {} as never })),
   Layer.provide(Layer.mock(ModelsDev.Service)({ refresh: (force) => Effect.sync(() => void refreshes.push(force)) })),
   Layer.provide(
+    Layer.mock(AccountPool.Service)({
+      list: () =>
+        Effect.succeed({
+          groq: [{ id: "acc_1", label: "Account 1", kind: "api" as const, added: 1, active: true }],
+        }),
+      beginAdd: (providerID) => Effect.sync(() => void accountCalls.push(`add:${providerID}`)),
+      select: (providerID, accountID) =>
+        Effect.sync(() => (accountCalls.push(`select:${providerID}:${accountID}`), true)),
+      remove: (providerID, accountID) => Effect.succeed(accountID === "acc_1"),
+    }),
+  ),
+  Layer.provide(
     Layer.mock(Installation.Service)({
       method: () => Effect.succeed("npm"),
       latest: () => Effect.succeed("9.9.9"),
@@ -95,6 +109,41 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("lists provider accounts without secrets and starts, selects and removes accounts", () =>
+    Effect.gen(function* () {
+      const list = yield* HttpClientRequest.get(GlobalPaths.modAccounts).pipe(HttpClient.execute)
+      expect(list.status).toBe(200)
+      expect(yield* list.json).toEqual({
+        groq: [{ id: "acc_1", label: "Account 1", kind: "api", added: 1, active: true }],
+      })
+
+      const add = yield* HttpClientRequest.post(GlobalPaths.modAccountsAdd).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ providerID: "groq" }),
+        HttpClient.execute,
+      )
+      expect(yield* add.json).toBe(true)
+
+      const select = yield* HttpClientRequest.post(GlobalPaths.modAccountsSelect).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ providerID: "groq", accountID: "acc_1" }),
+        HttpClient.execute,
+      )
+      expect(yield* select.json).toBe(true)
+      expect(accountCalls).toEqual(["add:groq", "select:groq:acc_1"])
+
+      const remove = yield* HttpClientRequest.post(GlobalPaths.modAccountsRemove).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ providerID: "groq", accountID: "missing" }),
+        HttpClient.execute,
+      )
+      expect(yield* remove.json).toBe(false)
+
+      const invalid = yield* HttpClientRequest.post(GlobalPaths.modAccountsSelect).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ providerID: "groq" }),
+        HttpClient.execute,
+      )
+      expect(invalid.status).toBe(400)
+    }),
+  )
+
   it.live("refreshes the model catalog without the cache", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(GlobalPaths.modModelsRefresh).pipe(HttpClient.execute)

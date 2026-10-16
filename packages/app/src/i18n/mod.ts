@@ -82,6 +82,7 @@ export const dict = {
   "mod.permissions.tool.task": "Start subagents",
   "mod.permissions.tool.webfetch": "Fetch web pages",
   "mod.permissions.tool.websearch": "Search the web",
+  "mod.permissions.tool.computer": "Computer use",
   "mod.permissions.tool.external_directory": "Files outside the project",
   "mod.permissions.tool.skill": "Use skills",
   "mod.permissions.tool.lsp": "Language server",
@@ -174,6 +175,9 @@ export const dict = {
   "mod.experimental.flag.OPENCODE_EXPERIMENTAL_LSP_TOOL": "LSP tool",
   "mod.experimental.flag.OPENCODE_EXPERIMENTAL_LSP_TOOL.description":
     "Gives agents a language-server tool for definitions, references and diagnostics.",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_COMPUTER_USE": "Computer use",
+  "mod.experimental.flag.OPENCODE_EXPERIMENTAL_COMPUTER_USE.description":
+    "Lets agents see your screen and control the mouse and keyboard to work in desktop apps. You approve each app the first time. Windows only.",
   "mod.experimental.flag.OPENCODE_ENABLE_EXA": "Exa web search",
   "mod.experimental.flag.OPENCODE_ENABLE_EXA.description": "Use Exa as the web search provider.",
   "mod.experimental.flag.OPENCODE_ENABLE_PARALLEL": "Parallel web search",
@@ -277,4 +281,16 @@ export const dict = {
   "mod.prompts.library.name": "Name",
   "mod.prompts.library.copy": "Copy to my prompts",
   "mod.prompts.toast.savedToLibrary": "Saved to my prompts",
+
+  "mod.accounts.add": "Add account",
+  "mod.accounts.hint": "{{count}} accounts. When one reaches its limit, the next one takes over automatically.",
+  "mod.accounts.active": "In use",
+  "mod.accounts.limited": "Limit reached, back at {{time}}",
+  "mod.accounts.use": "Use",
+  "mod.accounts.remove": "Remove",
+  "mod.accounts.adding.title": "Adding another {{provider}} account",
+  "mod.accounts.adding.description":
+    "Sign in with a different account. For browser sign-ins, sign out of {{provider}} in your browser first or use a private window.",
+  "mod.accounts.toast.switched": "Now using {{account}}",
+  "mod.accounts.toast.removed": "Removed {{account}}",
 }

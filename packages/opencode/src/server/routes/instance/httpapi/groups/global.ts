@@ -148,6 +148,21 @@ const ModFreeTier = Schema.Struct({
   requests: Schema.Array(ModFreeTierRequest),
 }).annotate({ identifier: "ModFreeTier" })
 
+// OpenCode Mod: several accounts per provider. Secrets never leave the server.
+const ModAccount = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  kind: Schema.Literals(["api", "oauth", "wellknown"]),
+  added: Schema.Finite,
+  active: Schema.Boolean,
+  limitedUntil: Schema.optional(Schema.Finite),
+}).annotate({ identifier: "ModAccount" })
+
+const ModAccounts = Schema.Record(Schema.String, Schema.Array(ModAccount)).annotate({ identifier: "ModAccounts" })
+
+export const ModAccountAddInput = Schema.Struct({ providerID: Schema.String })
+export const ModAccountInput = Schema.Struct({ providerID: Schema.String, accountID: Schema.String })
+
 // OpenCode Mod: the built-in model system prompts, and the same prompts on upstream's dev branch.
 const ModPromptList = Schema.Struct({
   prompts: Schema.Array(
@@ -186,6 +201,10 @@ export const GlobalPaths = {
   modPrompts: "/global/mod/prompts",
   modPromptsUpstream: "/global/mod/prompts/upstream",
   modModelsRefresh: "/global/mod/models/refresh",
+  modAccounts: "/global/mod/accounts",
+  modAccountsAdd: "/global/mod/accounts/add",
+  modAccountsSelect: "/global/mod/accounts/select",
+  modAccountsRemove: "/global/mod/accounts/remove",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -350,6 +369,51 @@ export const GlobalApi = HttpApi.make("global").add(
           summary: "Refresh the model catalog",
           description:
             "Download the model catalog from models.opencode.ai now instead of waiting for the hourly refresh. Each catalog publishes catalog.updated once it has reloaded.",
+        }),
+      ),
+      HttpApiEndpoint.get("modAccounts", GlobalPaths.modAccounts, {
+        success: described(ModAccounts, "Accounts by provider"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.mod.accounts",
+          summary: "List provider accounts",
+          description:
+            "Every account added for each provider, which one is active, and which are waiting out a usage limit. Providers with a single account are not listed.",
+        }),
+      ),
+      HttpApiEndpoint.post("modAccountsAdd", GlobalPaths.modAccountsAdd, {
+        payload: ModAccountAddInput,
+        success: described(Schema.Boolean, "Ready"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.mod.accountsAdd",
+          summary: "Start adding a provider account",
+          description:
+            "Keeps the provider's current account and makes the next login for it (within 15 minutes) a new account instead of a replacement.",
+        }),
+      ),
+      HttpApiEndpoint.post("modAccountsSelect", GlobalPaths.modAccountsSelect, {
+        payload: ModAccountInput,
+        success: described(Schema.Boolean, "Switched"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.mod.accountsSelect",
+          summary: "Use a provider account",
+          description: "Make one of a provider's accounts the active one.",
+        }),
+      ),
+      HttpApiEndpoint.post("modAccountsRemove", GlobalPaths.modAccountsRemove, {
+        payload: ModAccountInput,
+        success: described(Schema.Boolean, "Removed"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.mod.accountsRemove",
+          summary: "Remove a provider account",
+          description: "Remove one account; removing the last one disconnects the provider.",
         }),
       ),
     )

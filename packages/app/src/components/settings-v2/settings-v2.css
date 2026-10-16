@@ -745,3 +745,44 @@
 [data-component="dialog-v2"][data-variant="settings"] [data-slot="dialog-content"] {
   position: relative;
 }
+
+/* OpenCode Mod: a provider's accounts, under its row in Settings → Providers. */
+.settings-v2-provider-row[data-has-accounts] {
+  padding-bottom: 8px;
+  border-bottom: none;
+}
+
+.settings-v2-provider-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 16px 26px;
+  border-bottom: 0.5px solid var(--v2-border-border-base);
+}
+
+.settings-v2-provider-accounts-hint {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 440;
+  line-height: 18px;
+  color: var(--v2-text-text-muted);
+}
+
+.settings-v2-provider-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.settings-v2-provider-account-name {
+  font-size: 13px;
+  font-weight: 440;
+  line-height: 16px;
+  color: var(--v2-text-text-muted);
+}
+
+.settings-v2-provider-account[data-active] .settings-v2-provider-account-name {
+  color: var(--v2-text-text-base);
+}

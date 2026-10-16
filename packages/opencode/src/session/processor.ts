@@ -19,6 +19,7 @@ import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
 import type { Provider } from "@/provider/provider"
+import { AccountPool } from "@/auth/account-pool"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
@@ -94,6 +95,7 @@ const layer = Layer.effect(
     const image = yield* Image.Service
     const events = yield* EventV2Bridge.Service
     const database = yield* Database.Service
+    const accounts = yield* AccountPool.Service
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
@@ -675,6 +677,14 @@ const layer = Layer.effect(
               SessionRetry.policy({
                 provider: input.model.providerID,
                 parse,
+                // OpenCode Mod: on a usage or rate limit, carry on with the provider's next account.
+                switchAccount: (until) =>
+                  accounts.rotate(input.model.providerID, until).pipe(
+                    Effect.tap((label) =>
+                      label === undefined ? Effect.void : (llm.reloadProvider?.() ?? Effect.void),
+                    ),
+                    Effect.catch(() => Effect.succeed(undefined)),
+                  ),
                 set: (info) => {
                   return status.set(ctx.sessionID, {
                     type: "retry",
@@ -726,6 +736,7 @@ export const node = LayerNode.make({
     Image.node,
     EventV2Bridge.node,
     Database.node,
+    AccountPool.node,
   ],
 })
 

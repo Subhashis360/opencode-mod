@@ -7,6 +7,7 @@ import * as Observability from "@opencode-ai/core/observability"
 import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
 import { Auth } from "@/auth"
+import { AccountPool } from "@/auth/account-pool"
 import { BackgroundJob } from "@/background/job"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
@@ -214,6 +215,7 @@ const app = LayerNode.group([
   FSUtil.node,
   Database.node,
   Auth.node,
+  AccountPool.node,
   Account.node,
   Config.node,
   Env.node,

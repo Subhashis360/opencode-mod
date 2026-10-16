@@ -15,6 +15,7 @@ export const PERMISSION_TOOLS = [
   "task",
   "webfetch",
   "websearch",
+  "computer",
   "external_directory",
   "skill",
   "lsp",

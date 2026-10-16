@@ -4,13 +4,14 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { showToast } from "@/utils/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
-import { createMemo, type Accessor, type Component, For, Show } from "solid-js"
+import { createEffect, createMemo, on, type Accessor, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerProtocol, useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { DialogConnectProvider, useProviderConnectController } from "../dialog-connect-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
+import { ProviderAccountList, useProviderAccounts } from "./mod/provider-accounts"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -40,10 +41,28 @@ export const SettingsProvidersV2: Component<{
   const serverSync = useServerSync()
   const providers = useProviders(props.directory)
   const providerConnect = useProviderConnectController({ onBack: props.onBack })
+  // OpenCode Mod: several accounts per provider.
+  const accounts = useProviderAccounts()
 
   const connect = (provider?: string) => {
     providerConnect.select(provider)
-    void dialog.show(() => <DialogConnectProvider directory={props.directory} controller={providerConnect} />)
+    void dialog.show(
+      () => <DialogConnectProvider directory={props.directory} controller={providerConnect} />,
+      accounts.refetch,
+    )
+  }
+
+  // A login (or a provider disconnected elsewhere) reloads the provider list; accounts follow it.
+  createEffect(on(() => providers.connected(), accounts.refetch, { defer: true }))
+
+  const addAccount = async (item: ProviderItem) => {
+    if (!(await accounts.beginAdd(item.id))) return
+    showToast({
+      icon: "circle-check",
+      title: language.t("mod.accounts.adding.title", { provider: item.name }),
+      description: language.t("mod.accounts.adding.description", { provider: item.name }),
+    })
+    connect(item.id)
   }
 
   const connected = createMemo(() => {
@@ -83,6 +102,9 @@ export const SettingsProvidersV2: Component<{
 
   const canDisconnect = (item: ProviderItem) =>
     source(item) !== "env" && (protocol() === "v1" || !isConfigCustom(item.id))
+
+  // Accounts live in the stored credentials, which config-defined custom providers do not use.
+  const canAddAccount = (item: ProviderItem) => canDisconnect(item) && !isConfigCustom(item.id)
 
   // Only providers this form authored can be round-tripped back into it.
   const canEdit = (item: ProviderItem) => protocol() === "v1" && isConfigCustom(item.id)
@@ -138,6 +160,7 @@ export const SettingsProvidersV2: Component<{
       .client.auth.remove({ providerID })
       .then(async () => {
         await serverSdk().client.global.dispose()
+        accounts.refetch()
         showToast({
           variant: "success",
           icon: "circle-check",
@@ -169,43 +192,66 @@ export const SettingsProvidersV2: Component<{
             >
               <For each={connected()}>
                 {(item) => (
-                  <div class="settings-v2-provider-row group">
-                    <div class="settings-v2-provider-lead">
-                      <ProviderIcon
-                        id={item.id}
-                        width={PROVIDER_ICON_SIZE}
-                        height={PROVIDER_ICON_SIZE}
-                        class="settings-v2-provider-icon shrink-0"
-                      />
-                      <div class="settings-v2-provider-main">
-                        <span class="settings-v2-provider-name truncate">{item.name}</span>
-                        <Tag>{type(item)}</Tag>
-                      </div>
-                    </div>
-                    <Show
-                      when={canDisconnect(item)}
-                      fallback={
-                        <span class="settings-v2-provider-env-hint">
-                          {language.t("settings.providers.connected.environmentDescription")}
-                        </span>
-                      }
+                  <>
+                    <div
+                      class="settings-v2-provider-row group"
+                      data-has-accounts={accounts.list(item.id).length > 0 ? "" : undefined}
                     >
-                      <div class="settings-v2-provider-actions">
-                        <Show when={canEdit(item)}>
-                          <ButtonV2 size="normal" variant="ghost-muted" onClick={() => edit(item.id)}>
-                            {language.t("common.edit")}
-                          </ButtonV2>
-                        </Show>
-                        <ButtonV2
-                          size="normal"
-                          variant="ghost-muted"
-                          onClick={() => void disconnect(item.id, item.name)}
-                        >
-                          {language.t("common.disconnect")}
-                        </ButtonV2>
+                      <div class="settings-v2-provider-lead">
+                        <ProviderIcon
+                          id={item.id}
+                          width={PROVIDER_ICON_SIZE}
+                          height={PROVIDER_ICON_SIZE}
+                          class="settings-v2-provider-icon shrink-0"
+                        />
+                        <div class="settings-v2-provider-main">
+                          <span class="settings-v2-provider-name truncate">{item.name}</span>
+                          <Tag>{type(item)}</Tag>
+                        </div>
                       </div>
+                      <Show
+                        when={canDisconnect(item)}
+                        fallback={
+                          <span class="settings-v2-provider-env-hint">
+                            {language.t("settings.providers.connected.environmentDescription")}
+                          </span>
+                        }
+                      >
+                        <div class="settings-v2-provider-actions">
+                          <Show when={canAddAccount(item)}>
+                            <ButtonV2
+                              size="normal"
+                              variant="ghost-muted"
+                              icon="plus"
+                              onClick={() => void addAccount(item)}
+                            >
+                              {language.t("mod.accounts.add")}
+                            </ButtonV2>
+                          </Show>
+                          <Show when={canEdit(item)}>
+                            <ButtonV2 size="normal" variant="ghost-muted" onClick={() => edit(item.id)}>
+                              {language.t("common.edit")}
+                            </ButtonV2>
+                          </Show>
+                          <ButtonV2
+                            size="normal"
+                            variant="ghost-muted"
+                            onClick={() => void disconnect(item.id, item.name)}
+                          >
+                            {language.t("common.disconnect")}
+                          </ButtonV2>
+                        </div>
+                      </Show>
+                    </div>
+                    <Show when={accounts.list(item.id).length > 0}>
+                      <ProviderAccountList
+                        providerID={item.id}
+                        accounts={accounts.list(item.id)}
+                        onUse={(account) => void accounts.use(item.id, account)}
+                        onRemove={(account) => void accounts.remove(item.id, account)}
+                      />
                     </Show>
-                  </div>
+                  </>
                 )}
               </For>
             </Show>

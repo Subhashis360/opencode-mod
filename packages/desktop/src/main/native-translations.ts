@@ -5,8 +5,11 @@ import {
   type DesktopNativeBundle,
   type DesktopNativeKey,
 } from "@opencode-ai/app/i18n/desktop-native"
+import { brandDict } from "@opencode-ai/app/i18n/mod-brand"
+import { MOD } from "./constants"
 
-let bundle: DesktopNativeBundle = { locale: "en", messages: { ...DESKTOP_NATIVE_ENGLISH } }
+// Used until the renderer sends its bundle (already branded for the mod), e.g. when it fails to load.
+let bundle: DesktopNativeBundle = { locale: "en", messages: brandDict({ ...DESKTOP_NATIVE_ENGLISH }, MOD) }
 
 export function setNativeTranslations(next: DesktopNativeBundle) {
   if (

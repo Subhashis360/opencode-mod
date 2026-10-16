@@ -4,10 +4,13 @@ import { Effect, Layer, Record, Result, Schema, Context } from "effect"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Global } from "@opencode-ai/core/global"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import * as Accounts from "./accounts"
 
 export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
 
 const file = path.join(Global.Path.data, "auth.json")
+// OpenCode Mod: every account per provider; auth.json holds the active one.
+export const poolFile = path.join(Global.Path.data, "mod-accounts.json")
 
 const fail = (message: string) => (cause: unknown) => new AuthError({ message, cause })
 
@@ -70,7 +73,7 @@ const layer = Layer.effect(
       return (yield* all())[providerID]
     })
 
-    const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
+    const write = Effect.fn("Auth.write")(function* (key: string, info: Info) {
       const norm = key.replace(/\/+$/, "")
       const data = yield* all()
       if (norm !== key) delete data[key]
@@ -78,14 +81,35 @@ const layer = Layer.effect(
       yield* fsys
         .writeJson(file, { ...data, [norm]: info }, 0o600)
         .pipe(Effect.mapError(fail("Failed to write auth data")))
+      return norm
     })
 
-    const remove = Effect.fn("Auth.remove")(function* (key: string) {
+    const erase = Effect.fn("Auth.erase")(function* (key: string) {
       const norm = key.replace(/\/+$/, "")
       const data = yield* all()
       delete data[key]
       delete data[norm]
       yield* fsys.writeJson(file, data, 0o600).pipe(Effect.mapError(fail("Failed to write auth data")))
+      return norm
+    })
+
+    // OpenCode Mod: keep the account pool in step with auth.json. The credential is already saved
+    // when this runs, so a pool problem is logged and never fails the login itself.
+    const syncPool = (update: (pool: Accounts.Pool) => Accounts.Pool) =>
+      Effect.gen(function* () {
+        const pool = Accounts.parsePool(yield* fsys.readJson(poolFile).pipe(Effect.orElseSucceed(() => ({}))))
+        const next = update(pool)
+        if (next !== pool) yield* fsys.writeJson(poolFile, next, 0o600)
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning("failed to update provider accounts", { cause })))
+
+    const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
+      const norm = yield* write(key, info)
+      yield* syncPool((pool) => Accounts.onSet(pool, norm, info, Date.now(), Accounts.newID))
+    })
+
+    const remove = Effect.fn("Auth.remove")(function* (key: string) {
+      const norm = yield* erase(key)
+      yield* syncPool((pool) => Accounts.onRemove(pool, norm))
     })
 
     return Service.of({ get, all, set, remove })
