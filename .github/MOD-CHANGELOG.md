@@ -4,9 +4,9 @@ Each section is named after the upstream OpenCode version the mod release is bas
 
 ## 1.18.29
 
-### 1.18.2906
+### 1.18.2907
 
-**Computer use (Experimental, Windows).** The agent can open apps, read windows, click, type and check its own work in your desktop apps, with the free models. It reads windows as text through UI Automation first, so it often needs no screenshot. `click_element` presses buttons and ticks boxes through accessibility without moving your mouse. You approve each app the first time; terminals and IDEs only get plain clicks. Turn it on in Settings → Mod → Experimental.
+**Computer use (Experimental, Windows).** The agent can open apps, read windows, click, type and check its own work in your desktop apps, with the free models. It reads windows as text through UI Automation first, so it often needs no screenshot. `read_window` and `click_element` work on the app the agent is using, even when OpenCode is in front or the app is on another screen, and `click_element` presses buttons and ticks boxes in the background without moving your mouse. You approve each app the first time; terminals and IDEs only get plain clicks. Turn it on in Settings → Mod → Experimental.
 
 **New in Settings → Mod**
 
@@ -20,6 +20,7 @@ Each section is named after the upstream OpenCode version the mod release is bas
 - Messages you send while the agent is working reach it on its next step instead of waiting for the run to end.
 - Long commands can run in the background and wake the agent when they finish or print what it is waiting for; a `jobs` tool lists, reads and stops them.
 - Computer use returns a screenshot with each screen-changing action, saving a model turn each time, and types about twice as fast.
+- Only the newest few computer-use screenshots are sent back to the model, so long runs no longer slow down with every step.
 
 **Desktop**
 
