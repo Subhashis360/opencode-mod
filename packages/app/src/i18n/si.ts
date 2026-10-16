@@ -1112,6 +1112,8 @@ export const dict: Record<string, string> = {
   "settings.permissions.tool.lsp.description": "භාෂා සේවාදායක විමසුම් ධාවනය කරන්න",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "Todo ලැයිස්තුව යාවත්කාලීන කරන්න",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "URL වෙතින් අන්තර්ගතය ලබා ගන්න",
   "settings.permissions.tool.websearch.title": "Web Search",

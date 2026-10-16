@@ -108,12 +108,40 @@ import type {
   GlobalModAccountsSelectResponses,
   GlobalModFreeTierErrors,
   GlobalModFreeTierResponses,
+  GlobalModHooksErrors,
+  GlobalModHooksResponses,
+  GlobalModHooksSaveErrors,
+  GlobalModHooksSaveResponses,
+  GlobalModHooksTestErrors,
+  GlobalModHooksTestResponses,
+  GlobalModMemoryEnabledErrors,
+  GlobalModMemoryEnabledResponses,
+  GlobalModMemoryErrors,
+  GlobalModMemoryRemoveErrors,
+  GlobalModMemoryRemoveResponses,
+  GlobalModMemoryResponses,
+  GlobalModMemorySaveErrors,
+  GlobalModMemorySaveResponses,
   GlobalModModelsRefreshErrors,
   GlobalModModelsRefreshResponses,
   GlobalModPromptsErrors,
   GlobalModPromptsResponses,
   GlobalModPromptsUpstreamErrors,
   GlobalModPromptsUpstreamResponses,
+  GlobalModScheduleCancelErrors,
+  GlobalModScheduleCancelResponses,
+  GlobalModScheduleCreateErrors,
+  GlobalModScheduleCreateResponses,
+  GlobalModScheduleListErrors,
+  GlobalModScheduleListResponses,
+  GlobalModScheduleRemoveErrors,
+  GlobalModScheduleRemoveResponses,
+  GlobalModScheduleRunErrors,
+  GlobalModScheduleRunResponses,
+  GlobalModScheduleRunsErrors,
+  GlobalModScheduleRunsResponses,
+  GlobalModScheduleUpdateErrors,
+  GlobalModScheduleUpdateResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -140,6 +168,7 @@ import type {
   McpStatusErrors,
   McpStatusResponses,
   ModelRef,
+  ModHook,
   MoveSessionDestination,
   OutputFormat,
   Part as Part2,
@@ -203,6 +232,8 @@ import type {
   QuestionReplyErrors,
   QuestionReplyResponses,
   QuestionV2Reply,
+  ScheduleTaskInput,
+  ScheduleTaskPatch,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionChildrenErrors,
@@ -1655,6 +1686,380 @@ export class Mod extends HeyApiClient {
       ThrowOnError
     >({
       url: "/global/mod/accounts/remove",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List scheduled tasks
+   *
+   * Every scheduled task with its next and last run.
+   */
+  public scheduleList<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GlobalModScheduleListResponses,
+      GlobalModScheduleListErrors,
+      ThrowOnError
+    >({ url: "/global/mod/schedule", ...options })
+  }
+
+  /**
+   * Create a scheduled task
+   *
+   * Add a task that runs on a schedule.
+   */
+  public scheduleCreate<ThrowOnError extends boolean = false>(
+    parameters?: {
+      scheduleTaskInput?: ScheduleTaskInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "scheduleTaskInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalModScheduleCreateResponses,
+      GlobalModScheduleCreateErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/schedule/create",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Update a scheduled task
+   *
+   * Change any field, pause or resume a task.
+   */
+  public scheduleUpdate<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+      patch?: ScheduleTaskPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "id" },
+            { in: "body", key: "patch" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      GlobalModScheduleUpdateResponses,
+      GlobalModScheduleUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/schedule/update",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete a scheduled task
+   *
+   * Delete a task and its run history.
+   */
+  public scheduleRemove<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "id" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalModScheduleRemoveResponses,
+      GlobalModScheduleRemoveErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/schedule/remove",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Run a scheduled task now
+   *
+   * Start the task now without changing its schedule.
+   */
+  public scheduleRun<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "id" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalModScheduleRunResponses,
+      GlobalModScheduleRunErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/schedule/run",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Stop a running task
+   *
+   * Stop the task's current run.
+   */
+  public scheduleCancel<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "id" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalModScheduleCancelResponses,
+      GlobalModScheduleCancelErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/schedule/cancel",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List scheduled task runs
+   *
+   * Recent runs of one task, or of all tasks.
+   */
+  public scheduleRuns<ThrowOnError extends boolean = false>(
+    parameters?: {
+      taskID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "taskID" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalModScheduleRunsResponses,
+      GlobalModScheduleRunsErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/schedule/runs",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List hooks
+   *
+   * List hooks
+   */
+  public hooks<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalModHooksResponses, GlobalModHooksErrors, ThrowOnError>({
+      url: "/global/mod/hooks",
+      ...options,
+    })
+  }
+
+  /**
+   * Replace the hook list
+   *
+   * Replace the hook list
+   */
+  public hooksSave<ThrowOnError extends boolean = false>(
+    parameters?: {
+      hooks?: Array<ModHook>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "hooks" }] }])
+    return (options?.client ?? this.client).post<GlobalModHooksSaveResponses, GlobalModHooksSaveErrors, ThrowOnError>({
+      url: "/global/mod/hooks/save",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Run a hook command once with sample input
+   *
+   * Run a hook command once with sample input
+   */
+  public hooksTest<ThrowOnError extends boolean = false>(
+    parameters?: {
+      command?: string
+      event?: "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "SessionIdle" | "PermissionAsked" | "SessionError"
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "command" },
+            { in: "body", key: "event" },
+            { in: "body", key: "directory" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalModHooksTestResponses, GlobalModHooksTestErrors, ThrowOnError>({
+      url: "/global/mod/hooks/test",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List saved memories
+   *
+   * List saved memories
+   */
+  public memory<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalModMemoryResponses, GlobalModMemoryErrors, ThrowOnError>({
+      url: "/global/mod/memory",
+      ...options,
+    })
+  }
+
+  /**
+   * Add or edit a memory
+   *
+   * Add or edit a memory
+   */
+  public memorySave<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+      text?: string
+      scope?: "global" | "project"
+      project?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "id" },
+            { in: "body", key: "text" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "project" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalModMemorySaveResponses, GlobalModMemorySaveErrors, ThrowOnError>(
+      {
+        url: "/global/mod/memory/save",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Delete a memory
+   *
+   * Delete a memory
+   */
+  public memoryRemove<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "id" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalModMemoryRemoveResponses,
+      GlobalModMemoryRemoveErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/memory/remove",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Turn auto memory on or off
+   *
+   * Turn auto memory on or off
+   */
+  public memoryEnabled<ThrowOnError extends boolean = false>(
+    parameters?: {
+      enabled?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "enabled" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalModMemoryEnabledResponses,
+      GlobalModMemoryEnabledErrors,
+      ThrowOnError
+    >({
+      url: "/global/mod/memory/enabled",
       ...options,
       ...params,
       headers: {

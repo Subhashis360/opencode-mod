@@ -1113,6 +1113,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Koyr fyrispurningar um mál-ambætara",
   "settings.permissions.tool.todowrite.title": "Todo Skriva",
   "settings.permissions.tool.todowrite.description": "Dagfør uppgávulistan",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Vevheinta",
   "settings.permissions.tool.webfetch.description": "Heinta innihald frá einum URL",
   "settings.permissions.tool.websearch.title": "Leitan á netinum",

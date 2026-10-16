@@ -268,3 +268,52 @@
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
 }
+
+.mod-schedule-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.mod-schedule-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.mod-schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mod-schedule-task .settings-v2-provider-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.mod-schedule-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 16px 12px;
+}
+.mod-schedule-run {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.mod-hooks-command {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 520px;
+}
+.mod-hooks-test {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow: auto;
+  margin: 0;
+}

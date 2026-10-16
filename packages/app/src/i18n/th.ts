@@ -1096,6 +1096,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "เรียกใช้การสืบค้นเซิร์ฟเวอร์ภาษา",
   "settings.permissions.tool.todowrite.title": "เขียนรายการงาน",
   "settings.permissions.tool.todowrite.description": "อัปเดตรายการงาน",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "ดึงข้อมูลจากเว็บ",
   "settings.permissions.tool.webfetch.description": "ดึงเนื้อหาจาก URL",
   "settings.permissions.tool.websearch.title": "ค้นหาเว็บ",

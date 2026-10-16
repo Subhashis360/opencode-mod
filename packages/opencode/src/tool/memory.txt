@@ -1,0 +1,12 @@
+Saves facts that should carry over to future sessions with this user. Saved facts appear in a <memory> block at the start of every session.
+
+Save when you learn something durable and useful later:
+- the user's preferences and working style ("prefers pnpm", "wants short answers", "never push without asking")
+- project conventions, decisions and their reasons, commands that work, gotchas you hit
+- corrections the user gives you, so the same mistake does not happen again
+
+Do not save: things already in the code, git history or AGENTS.md; one-off task details; secrets, tokens or passwords; guesses.
+
+Actions: save (text, scope), update (id, text), forget (id), list.
+scope "global" = about the user, everywhere. scope "project" (default) = only this project.
+Keep each fact to one short sentence. Before saving, check the <memory> block and update an existing entry instead of adding a near-duplicate. Forget entries that turn out to be wrong.

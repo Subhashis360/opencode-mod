@@ -6,7 +6,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { useLanguage } from "@/context/language"
 
 export function SessionFollowupDock(props: {
-  items: { id: string; text: string }[]
+  items: { id: string; text: string; sent?: boolean }[]
   sending?: string
   onSend: (id: string) => void
   onEdit: (id: string) => void
@@ -77,6 +77,9 @@ export function SessionFollowupDock(props: {
             {(item) => (
               <div class="flex items-center gap-2 min-w-0 py-1">
                 <span class="min-w-0 flex-1 truncate text-13-regular text-text-strong">{item.text}</span>
+                <Show when={item.sent}>
+                  <span class="shrink-0 text-12-regular text-text-weak">{language.t("mod.followup.pending")}</span>
+                </Show>
                 <Button
                   size="small"
                   variant="secondary"

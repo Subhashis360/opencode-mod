@@ -1224,6 +1224,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Виконання запитів мовного сервера",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "Оновлення списку завдань",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "Отримання вмісту з URL",
   "settings.permissions.tool.websearch.title": "Web Search",

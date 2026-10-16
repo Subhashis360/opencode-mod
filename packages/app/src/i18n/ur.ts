@@ -1124,6 +1124,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "زبان کے سرور کے سوالات چلائیں۔",
   "settings.permissions.tool.todowrite.title": "ٹوڈو لکھیں۔",
   "settings.permissions.tool.todowrite.description": "ٹوڈو لسٹ کو اپ ڈیٹ کریں۔",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "ویب بازیافت",
   "settings.permissions.tool.webfetch.description": "URL سے مواد حاصل کریں۔",
   "settings.permissions.tool.websearch.title": "ویب تلاش",

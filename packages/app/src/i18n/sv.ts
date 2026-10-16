@@ -1120,6 +1120,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Kör språkserverfrågor",
   "settings.permissions.tool.todowrite.title": "Skriv att göra-lista",
   "settings.permissions.tool.todowrite.description": "Uppdatera att göra-listan",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Webbhämtning",
   "settings.permissions.tool.webfetch.description": "Hämta innehåll från en URL",
   "settings.permissions.tool.websearch.title": "Webbsökning",

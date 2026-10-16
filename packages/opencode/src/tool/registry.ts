@@ -30,6 +30,9 @@ import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
 import { ComputerTool } from "./computer"
+import { ScheduleTool } from "./schedule"
+import { MemoryTool } from "./memory"
+import { JobsTool } from "./jobs"
 import { ComputerDriver } from "@/computer/driver"
 import { Glob } from "@opencode-ai/core/util/glob"
 import path from "path"
@@ -117,6 +120,9 @@ const layer = Layer.effect(
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
     const computertool = yield* ComputerTool
+    const scheduletool = yield* ScheduleTool
+    const memorytool = yield* MemoryTool
+    const jobstool = yield* JobsTool
     const agent = yield* Agent.Service
     const codeMode = flags.experimentalCodeMode ? yield* Effect.promise(() => import("./code-mode")) : undefined
     const codeModeTool = codeMode ? yield* codeMode.CodeModeTool : undefined
@@ -227,6 +233,9 @@ const layer = Layer.effect(
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
           computer: Tool.init(computertool),
+          schedule: Tool.init(scheduletool),
+          memory: Tool.init(memorytool),
+          jobs: Tool.init(jobstool),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
 
@@ -247,10 +256,14 @@ const layer = Layer.effect(
             tool.search,
             tool.skill,
             tool.patch,
+            tool.schedule,
+            tool.memory,
+            tool.jobs,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalComputerUse && ComputerDriver.supported() ? [tool.computer] : []),
-            ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
+            // OpenCode Mod: plan mode's approve-the-plan step works in the desktop app too.
+            ...(flags.experimentalPlanMode && ["cli", "app", "desktop"].includes(flags.client) ? [tool.plan] : []),
           ],
           task: tool.task,
           read: tool.read,

@@ -1128,6 +1128,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Dil server sorğularını işlət",
   "settings.permissions.tool.todowrite.title": "Tapşırıq yaz",
   "settings.permissions.tool.todowrite.description": "Tapşırıq siyahısını yenilə",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Veb əldə et",
   "settings.permissions.tool.webfetch.description": "URL-dən məzmun əldə et",
   "settings.permissions.tool.websearch.title": "Veb axtarış",

@@ -10,6 +10,8 @@ const sessionFreshness = 15_000
 export function createTimelineModel(input: {
   sessionID: Accessor<string | undefined>
   revertMessageID: Accessor<string | undefined>
+  /** Queued follow-ups already on the server but not yet read by the agent; the dock shows them. */
+  hidden?: Accessor<ReadonlySet<string>>
 }) {
   const serverSync = useServerSync()
   const sync = useSync()
@@ -50,7 +52,9 @@ export function createTimelineModel(input: {
   const userMessages = createMemo(() => selectUserMessages(messages()), emptyUserMessages, { equals: same })
   const visibleUserMessages = createMemo(
     () => {
-      return selectVisibleUserMessages(userMessages(), input.revertMessageID())
+      const visible = selectVisibleUserMessages(userMessages(), input.revertMessageID())
+      const hidden = input.hidden?.()
+      return hidden?.size ? visible.filter((message) => !hidden.has(message.id)) : visible
     },
     emptyUserMessages,
     { equals: same },

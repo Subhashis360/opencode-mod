@@ -41,6 +41,7 @@ import {
   setBackgroundColor,
   setDockIcon,
   restoreMainWindows,
+  iconPath,
 } from "./windows"
 import { createWslServersController } from "./wsl/servers"
 import { registerWslIpcHandlers } from "./wsl/ipc"
@@ -48,6 +49,14 @@ import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
 import { startBackgroundCli } from "./background-cli"
+import {
+  backgroundEnabled,
+  markQuitting,
+  setupBackground,
+  startedHidden,
+  stayInTray,
+  watchScheduleEvents,
+} from "./background"
 import { setNativeTranslations } from "./native-translations"
 
 const APP_NAMES: Record<string, string> = {
@@ -201,6 +210,8 @@ const main = Effect.gen(function* () {
   }
 
   const shellEnv = preferAppEnv(app.getPath("userData"))
+  // Assigned once windows exist; the tray, notifications and a second launch all use it.
+  let openWindow = () => {}
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith(`${PROTOCOL}://`)).map(normalizeDeepLink)
@@ -208,11 +219,7 @@ const main = Effect.gen(function* () {
       logger.log("deep link received via second-instance", { urls })
       emitDeepLinks(urls)
     }
-    const win = getLastFocusedWindow()
-    if (win) {
-      win.show()
-      win.focus()
-    }
+    openWindow()
   })
 
   app.on("open-url", (event: Event, url: string) => {
@@ -222,6 +229,7 @@ const main = Effect.gen(function* () {
   })
 
   app.on("before-quit", () => {
+    markQuitting()
     setAppQuitting()
     void stopSidecars()
   })
@@ -410,6 +418,8 @@ const main = Effect.gen(function* () {
 
   app.on("window-all-closed", () => {
     if (process.platform === "darwin") return
+    // OpenCode Mod: stay in the tray so scheduled tasks keep running.
+    if (stayInTray()) return
     app.quit()
   })
   app.on("activate", () => {
@@ -417,8 +427,26 @@ const main = Effect.gen(function* () {
     restoreMainWindows()
   })
 
-  const windows = restoreMainWindows()
+  // A sign-in launch (--hidden) starts in the tray only.
+  const windows = startedHidden() && backgroundEnabled() ? [] : restoreMainWindows()
   if (windows.length) createMenu(menuDeps)
+  openWindow = () => {
+    const win = getLastFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    if (!win) {
+      if (restoreMainWindows().length) createMenu(menuDeps)
+      return
+    }
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+  setupBackground({ icon: iconPath(), open: () => openWindow() })
+  const ready = yield* Deferred.await(serverReady).pipe(Effect.option)
+  if (ready._tag === "Some")
+    watchScheduleEvents(
+      { url: ready.value.url, username: ready.value.username ?? "opencode", password: ready.value.password ?? "" },
+      () => openWindow(),
+    )
 })
 
 Effect.runFork(main)

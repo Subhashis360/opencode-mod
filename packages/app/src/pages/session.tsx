@@ -104,7 +104,8 @@ import { useUsageExceededDialogs } from "./session/usage-exceeded-dialogs"
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 
-type FollowupItem = FollowupDraft & { id: string }
+// `sent`: already on the server, which folds it into the agent's next model call.
+type FollowupItem = FollowupDraft & { id: string; sent?: boolean }
 type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
 const emptyFollowups: FollowupItem[] = []
 
@@ -545,7 +546,8 @@ export default function Page() {
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
   const revertMessageID = createMemo(() => info()?.revert?.messageID)
-  const timeline = createTimelineModel({ sessionID: () => params.id, revertMessageID })
+  const [queuedIDs, setQueuedIDs] = createSignal<ReadonlySet<string>>(new Set())
+  const timeline = createTimelineModel({ sessionID: () => params.id, revertMessageID, hidden: queuedIDs })
   const historyLoading = timeline.history.loading
   const historyMore = timeline.history.more
   const lastUserMessage = timeline.lastUserMessage
@@ -1774,16 +1776,53 @@ export default function Page() {
     return `[${language.t("common.attachment")}]`
   }
 
+  // Like Claude: a message typed during a run goes to the server right away and rides along with
+  // the agent's next model call (the loop re-reads the conversation before every call). It stays in
+  // the dock, out of the timeline, until the agent has read it.
   const queueFollowup = (draft: FollowupDraft) => {
-    setFollowup("items", draft.sessionID, (items) => [
-      ...(items ?? []),
-      { id: Identifier.ascending("message"), ...draft },
-    ])
+    const item: FollowupItem = { id: Identifier.ascending("message"), ...draft }
+    setFollowup("items", draft.sessionID, (items) => [...(items ?? []), item])
     setFollowup("failed", draft.sessionID, undefined)
     setFollowup("paused", draft.sessionID, undefined)
+    const mark = (sent: boolean) =>
+      setFollowup("items", draft.sessionID, (items) =>
+        (items ?? []).map((entry) => (entry.id === item.id ? { ...entry, sent } : entry)),
+      )
+    void sendFollowupDraft({
+      api: sdk().api.session,
+      sync: sync(),
+      serverSync: serverSync(),
+      draft: item,
+      messageID: item.id,
+      before: () => {
+        mark(true)
+        return true
+      },
+    }).catch((err) => {
+      mark(false)
+      setFollowup("failed", draft.sessionID, item.id)
+      fail(err)
+    })
   }
 
-  const followupDock = createMemo(() => queuedFollowups().map((item) => ({ id: item.id, text: followupText(item) })))
+  createEffect(() => {
+    const sessionID = params.id
+    const items = queuedFollowups()
+    setQueuedIDs(new Set(items.map((item) => item.id)))
+    if (!sessionID) return
+    const sent = items.filter((item) => item.sent)
+    if (sent.length === 0) return
+    // Read once the agent replies to it, or once the run is over (it was stopped before the next call).
+    const answered = new Set(messages().flatMap((message) => (message.role === "assistant" ? [message.parentID] : [])))
+    const done = sent.filter((item) => answered.has(item.id) || !busy(sessionID))
+    if (done.length === 0) return
+    const ids = new Set(done.map((item) => item.id))
+    setFollowup("items", sessionID, (list) => (list ?? []).filter((entry) => !ids.has(entry.id)))
+  })
+
+  const followupDock = createMemo(() =>
+    queuedFollowups().map((item) => ({ id: item.id, text: followupText(item), sent: item.sent })),
+  )
 
   const sendFollowup = (sessionID: string, id: string, opts?: { manual?: boolean }) => {
     if (sync().session.get(sessionID)?.parentID) return Promise.resolve()
@@ -1794,6 +1833,26 @@ export default function Page() {
     return followupMutation.mutateAsync({ sessionID, id, manual: opts?.manual })
   }
 
+  // Send now on a message that is already waiting for the next step: take it back, stop the
+  // current step, and send it as a fresh request once the session is idle (the auto-send effect).
+  const sendQueuedNow = (sessionID: string, id: string) => {
+    const item = (followup.items[sessionID] ?? []).find((entry) => entry.id === id)
+    if (!item?.sent) return void sendFollowup(sessionID, id, { manual: true })
+    void sdk()
+      .client.session.deleteMessage({ sessionID, messageID: id }, { throwOnError: true })
+      .then(() => {
+        sync().session.optimistic.remove({ directory: item.sessionDirectory, sessionID, messageID: id })
+        setFollowup("items", sessionID, (items) =>
+          (items ?? []).map((entry) =>
+            entry.id === id ? { ...entry, id: Identifier.ascending("message"), sent: false } : entry,
+          ),
+        )
+        setFollowup("paused", sessionID, undefined)
+        return sdk().api.session.interrupt({ sessionID })
+      })
+      .catch(() => {})
+  }
+
   const editFollowup = (id: string) => {
     const sessionID = params.id
     if (!sessionID) return
@@ -1801,6 +1860,19 @@ export default function Page() {
 
     const item = queuedFollowups().find((entry) => entry.id === id)
     if (!item) return
+
+    if (item.sent) {
+      // Pull it back before the agent reads it; once read it is part of the conversation.
+      void sdk()
+        .client.session.deleteMessage({ sessionID, messageID: id }, { throwOnError: true })
+        .then(() => {
+          sync().session.optimistic.remove({ directory: item.sessionDirectory, sessionID, messageID: id })
+          setFollowup("items", sessionID, (items) => (items ?? []).filter((entry) => entry.id !== id))
+          setFollowup("edit", sessionID, { id: item.id, prompt: item.prompt, context: item.context })
+        })
+        .catch(() => showToast({ title: language.t("mod.followup.alreadyRead") }))
+      return
+    }
 
     setFollowup("items", sessionID, (items) => (items ?? []).filter((entry) => entry.id !== id))
     setFollowup("failed", sessionID, (value) => (value === id ? undefined : value))
@@ -1929,7 +2001,7 @@ export default function Page() {
     const sessionID = params.id
     if (!sessionID) return
 
-    const item = queuedFollowups()[0]
+    const item = queuedFollowups().find((entry) => !entry.sent)
     if (!item) return
     if (followupBusy(sessionID)) return
     if (followup.failed[sessionID] === item.id) return
@@ -2146,7 +2218,7 @@ export default function Page() {
                 ? {
                     items: followupDock(),
                     sending: sendingFollowup(),
-                    onSend: (id) => void sendFollowup(params.id!, id, { manual: true }),
+                    onSend: (id) => sendQueuedNow(params.id!, id),
                     onEdit: editFollowup,
                   }
                 : undefined,

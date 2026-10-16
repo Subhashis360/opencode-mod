@@ -1121,6 +1121,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Izpildīt valodas servera vaicājumus",
   "settings.permissions.tool.todowrite.title": "Todo rakstīšana",
   "settings.permissions.tool.todowrite.description": "Atjaunināt uzdevumu sarakstu",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web iegūšana",
   "settings.permissions.tool.webfetch.description": "Iegūt saturu no URL",
   "settings.permissions.tool.websearch.title": "Tīmekļa meklēšana",

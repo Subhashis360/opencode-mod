@@ -2117,6 +2117,174 @@ export type ModAccounts = {
   [key: string]: Array<ModAccount>
 }
 
+export type ScheduleTrigger =
+  | {
+      kind: "once"
+      at: number
+    }
+  | {
+      kind: "interval"
+      minutes: number
+    }
+  | {
+      kind: "daily"
+      time: string
+    }
+  | {
+      kind: "weekly"
+      time: string
+      days: Array<number>
+    }
+  | {
+      kind: "monthly"
+      time: string
+      day: number
+    }
+  | {
+      kind: "cron"
+      expression: string
+    }
+
+export type ScheduleRun = {
+  id: string
+  taskID: string
+  reason: "schedule" | "manual" | "catchup"
+  started: number
+  finished?: number
+  status: "running" | "success" | "failed" | "timeout" | "cancelled" | "skipped" | "missed"
+  sessionID?: string
+  directory: string
+  error?: string
+  handled?: number
+}
+
+export type ScheduleTask = {
+  id: string
+  name: string
+  prompt: string
+  directory: string
+  trigger: ScheduleTrigger
+  enabled: boolean
+  agent?: string
+  model?: {
+    providerID: string
+    modelID: string
+    variant?: string
+  }
+  permission: "ask" | "deny" | "allow"
+  catchUp: boolean
+  notify: boolean
+  timeoutMinutes: number
+  created: number
+  updated: number
+  nextRun: number
+  lastRun?: ScheduleRun
+}
+
+export type ScheduleList = {
+  tasks: Array<ScheduleTask>
+  /**
+   * IDs of tasks running right now
+   */
+  active: Array<string>
+}
+
+export type ScheduleTaskInput = {
+  name: string
+  prompt: string
+  directory: string
+  trigger: ScheduleTrigger
+  enabled?: boolean
+  agent?: string
+  model?: {
+    providerID: string
+    modelID: string
+    variant?: string
+  }
+  permission?: "ask" | "deny" | "allow"
+  catchUp?: boolean
+  notify?: boolean
+  timeoutMinutes?: number
+}
+
+export type ScheduleResult =
+  | {
+      success: true
+      task: ScheduleTask
+    }
+  | {
+      success: false
+      error: string
+    }
+
+export type ScheduleTaskPatch = {
+  name?: string
+  prompt?: string
+  directory?: string
+  trigger?: ScheduleTrigger
+  enabled?: boolean
+  agent?: string
+  model?: {
+    providerID: string
+    modelID: string
+    variant?: string
+  }
+  permission?: "ask" | "deny" | "allow"
+  catchUp?: boolean
+  notify?: boolean
+  timeoutMinutes?: number
+}
+
+export type ModHook = {
+  id?: string
+  name: string
+  event: "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "SessionIdle" | "PermissionAsked" | "SessionError"
+  matcher?: string
+  command: string
+  timeout?: number
+  enabled: boolean
+}
+
+export type ModHookSaveResult =
+  | {
+      success: true
+      hooks: Array<ModHook>
+    }
+  | {
+      success: false
+      error: string
+    }
+
+export type ModHookTestResult = {
+  code: number
+  stdout: string
+  stderr: string
+}
+
+export type ModMemoryEntry = {
+  id: string
+  scope: "global" | "project"
+  project?: string
+  text: string
+  created: number
+  updated: number
+}
+
+export type ModMemoryList = {
+  enabled: boolean
+  entries: Array<ModMemoryEntry>
+}
+
+export type ModMemoryResult =
+  | {
+      success: true
+      entry: ModMemoryEntry
+    }
+  | {
+      success: false
+      error: string
+    }
+
 export type Model = {
   id: string
   providerID: string
@@ -7843,6 +8011,382 @@ export type GlobalModAccountsRemoveResponses = {
 }
 
 export type GlobalModAccountsRemoveResponse = GlobalModAccountsRemoveResponses[keyof GlobalModAccountsRemoveResponses]
+
+export type GlobalModScheduleListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/mod/schedule"
+}
+
+export type GlobalModScheduleListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModScheduleListError = GlobalModScheduleListErrors[keyof GlobalModScheduleListErrors]
+
+export type GlobalModScheduleListResponses = {
+  /**
+   * Scheduled tasks
+   */
+  200: ScheduleList
+}
+
+export type GlobalModScheduleListResponse = GlobalModScheduleListResponses[keyof GlobalModScheduleListResponses]
+
+export type GlobalModScheduleCreateData = {
+  body?: ScheduleTaskInput
+  path?: never
+  query?: never
+  url: "/global/mod/schedule/create"
+}
+
+export type GlobalModScheduleCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModScheduleCreateError = GlobalModScheduleCreateErrors[keyof GlobalModScheduleCreateErrors]
+
+export type GlobalModScheduleCreateResponses = {
+  /**
+   * Created task or the reason it was refused
+   */
+  200: ScheduleResult
+}
+
+export type GlobalModScheduleCreateResponse = GlobalModScheduleCreateResponses[keyof GlobalModScheduleCreateResponses]
+
+export type GlobalModScheduleUpdateData = {
+  body?: {
+    id: string
+    patch: ScheduleTaskPatch
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/schedule/update"
+}
+
+export type GlobalModScheduleUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModScheduleUpdateError = GlobalModScheduleUpdateErrors[keyof GlobalModScheduleUpdateErrors]
+
+export type GlobalModScheduleUpdateResponses = {
+  /**
+   * Updated task or the reason it was refused
+   */
+  200: ScheduleResult
+}
+
+export type GlobalModScheduleUpdateResponse = GlobalModScheduleUpdateResponses[keyof GlobalModScheduleUpdateResponses]
+
+export type GlobalModScheduleRemoveData = {
+  body?: {
+    id: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/schedule/remove"
+}
+
+export type GlobalModScheduleRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModScheduleRemoveError = GlobalModScheduleRemoveErrors[keyof GlobalModScheduleRemoveErrors]
+
+export type GlobalModScheduleRemoveResponses = {
+  /**
+   * Removed
+   */
+  200: boolean
+}
+
+export type GlobalModScheduleRemoveResponse = GlobalModScheduleRemoveResponses[keyof GlobalModScheduleRemoveResponses]
+
+export type GlobalModScheduleRunData = {
+  body?: {
+    id: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/schedule/run"
+}
+
+export type GlobalModScheduleRunErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModScheduleRunError = GlobalModScheduleRunErrors[keyof GlobalModScheduleRunErrors]
+
+export type GlobalModScheduleRunResponses = {
+  /**
+   * Queued
+   */
+  200: boolean
+}
+
+export type GlobalModScheduleRunResponse = GlobalModScheduleRunResponses[keyof GlobalModScheduleRunResponses]
+
+export type GlobalModScheduleCancelData = {
+  body?: {
+    id: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/schedule/cancel"
+}
+
+export type GlobalModScheduleCancelErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModScheduleCancelError = GlobalModScheduleCancelErrors[keyof GlobalModScheduleCancelErrors]
+
+export type GlobalModScheduleCancelResponses = {
+  /**
+   * Whether a run was stopped
+   */
+  200: boolean
+}
+
+export type GlobalModScheduleCancelResponse = GlobalModScheduleCancelResponses[keyof GlobalModScheduleCancelResponses]
+
+export type GlobalModScheduleRunsData = {
+  body?: {
+    taskID?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/schedule/runs"
+}
+
+export type GlobalModScheduleRunsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModScheduleRunsError = GlobalModScheduleRunsErrors[keyof GlobalModScheduleRunsErrors]
+
+export type GlobalModScheduleRunsResponses = {
+  /**
+   * Recent runs, newest first
+   */
+  200: Array<ScheduleRun>
+}
+
+export type GlobalModScheduleRunsResponse = GlobalModScheduleRunsResponses[keyof GlobalModScheduleRunsResponses]
+
+export type GlobalModHooksData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/mod/hooks"
+}
+
+export type GlobalModHooksErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModHooksError = GlobalModHooksErrors[keyof GlobalModHooksErrors]
+
+export type GlobalModHooksResponses = {
+  /**
+   * Hooks
+   */
+  200: Array<ModHook>
+}
+
+export type GlobalModHooksResponse = GlobalModHooksResponses[keyof GlobalModHooksResponses]
+
+export type GlobalModHooksSaveData = {
+  body?: {
+    hooks: Array<ModHook>
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/hooks/save"
+}
+
+export type GlobalModHooksSaveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModHooksSaveError = GlobalModHooksSaveErrors[keyof GlobalModHooksSaveErrors]
+
+export type GlobalModHooksSaveResponses = {
+  /**
+   * Saved hooks or the reason they were refused
+   */
+  200: ModHookSaveResult
+}
+
+export type GlobalModHooksSaveResponse = GlobalModHooksSaveResponses[keyof GlobalModHooksSaveResponses]
+
+export type GlobalModHooksTestData = {
+  body?: {
+    command: string
+    event: "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "SessionIdle" | "PermissionAsked" | "SessionError"
+    directory?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/hooks/test"
+}
+
+export type GlobalModHooksTestErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModHooksTestError = GlobalModHooksTestErrors[keyof GlobalModHooksTestErrors]
+
+export type GlobalModHooksTestResponses = {
+  /**
+   * What the command printed and its exit code
+   */
+  200: ModHookTestResult
+}
+
+export type GlobalModHooksTestResponse = GlobalModHooksTestResponses[keyof GlobalModHooksTestResponses]
+
+export type GlobalModMemoryData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/mod/memory"
+}
+
+export type GlobalModMemoryErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModMemoryError = GlobalModMemoryErrors[keyof GlobalModMemoryErrors]
+
+export type GlobalModMemoryResponses = {
+  /**
+   * Memory
+   */
+  200: ModMemoryList
+}
+
+export type GlobalModMemoryResponse = GlobalModMemoryResponses[keyof GlobalModMemoryResponses]
+
+export type GlobalModMemorySaveData = {
+  body?: {
+    id?: string
+    text: string
+    scope: "global" | "project"
+    project?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/memory/save"
+}
+
+export type GlobalModMemorySaveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModMemorySaveError = GlobalModMemorySaveErrors[keyof GlobalModMemorySaveErrors]
+
+export type GlobalModMemorySaveResponses = {
+  /**
+   * Saved memory or the reason it was refused
+   */
+  200: ModMemoryResult
+}
+
+export type GlobalModMemorySaveResponse = GlobalModMemorySaveResponses[keyof GlobalModMemorySaveResponses]
+
+export type GlobalModMemoryRemoveData = {
+  body?: {
+    id: string
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/memory/remove"
+}
+
+export type GlobalModMemoryRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModMemoryRemoveError = GlobalModMemoryRemoveErrors[keyof GlobalModMemoryRemoveErrors]
+
+export type GlobalModMemoryRemoveResponses = {
+  /**
+   * Removed
+   */
+  200: boolean
+}
+
+export type GlobalModMemoryRemoveResponse = GlobalModMemoryRemoveResponses[keyof GlobalModMemoryRemoveResponses]
+
+export type GlobalModMemoryEnabledData = {
+  body?: {
+    enabled: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/mod/memory/enabled"
+}
+
+export type GlobalModMemoryEnabledErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalModMemoryEnabledError = GlobalModMemoryEnabledErrors[keyof GlobalModMemoryEnabledErrors]
+
+export type GlobalModMemoryEnabledResponses = {
+  /**
+   * Saved
+   */
+  200: boolean
+}
+
+export type GlobalModMemoryEnabledResponse = GlobalModMemoryEnabledResponses[keyof GlobalModMemoryEnabledResponses]
 
 export type EventSubscribeData = {
   body?: never

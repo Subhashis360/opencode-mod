@@ -942,6 +942,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Kjør språkserverforespørsler",
   "settings.permissions.tool.todowrite.title": "Skriv gjøremål",
   "settings.permissions.tool.todowrite.description": "Oppdater gjøremålslisten",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Webhenting",
   "settings.permissions.tool.webfetch.description": "Hent innhold fra en URL",
   "settings.permissions.tool.websearch.title": "Websøk",

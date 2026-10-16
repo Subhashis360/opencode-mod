@@ -1132,6 +1132,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Ερωτήματα διακομιστή γλώσσας εκτέλεσης",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "Ενημέρωση της λίστας εργασιών",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Λήψη Ιστού",
   "settings.permissions.tool.webfetch.description": "Λήψη περιεχομένου από ένα URL",
   "settings.permissions.tool.websearch.title": "Αναζήτηση Ιστού",

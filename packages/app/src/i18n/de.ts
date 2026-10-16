@@ -934,6 +934,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Language-Server-Abfragen ausführen",
   "settings.permissions.tool.todowrite.title": "Todo schreiben",
   "settings.permissions.tool.todowrite.description": "Die Todo-Liste aktualisieren",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web-Abruf",
   "settings.permissions.tool.webfetch.description": "Inhalt von einer URL abrufen",
   "settings.permissions.tool.websearch.title": "Web-Suche",

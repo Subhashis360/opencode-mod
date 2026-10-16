@@ -16,6 +16,9 @@ import { SettingsMcpV2 } from "./mod/mcp"
 import { SettingsCommandsV2 } from "./mod/commands"
 import { SettingsAccountV2 } from "./mod/account"
 import { SettingsExperimentalV2 } from "./mod/experimental"
+import { SettingsScheduleV2 } from "./mod/schedule"
+import { SettingsHooksV2 } from "./mod/hooks"
+import { SettingsMemoryV2 } from "./mod/memory"
 import { SettingsLimitsV2 } from "./mod/limits"
 import { SettingsPromptsV2 } from "./mod/prompts"
 import { useDialog, usePersistentDialog } from "@opencode-ai/ui/context/dialog"
@@ -136,6 +139,18 @@ export const DialogSettings: Component<{
                       <Icon name="console" />
                       {language.t("mod.commands.title")}
                     </TabsV2.Trigger>
+                    <TabsV2.Trigger value="schedule">
+                      <Icon name="checklist" />
+                      {language.t("mod.schedule.title")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="hooks">
+                      <Icon name="sliders" />
+                      {language.t("mod.hooks.title")}
+                    </TabsV2.Trigger>
+                    <TabsV2.Trigger value="memory">
+                      <Icon name="bullet-list" />
+                      {language.t("mod.memory.title")}
+                    </TabsV2.Trigger>
                     <TabsV2.Trigger value="experimental">
                       <Icon name="brain" />
                       {language.t("mod.experimental.title")}
@@ -185,6 +200,15 @@ export const DialogSettings: Component<{
         </TabsV2.Content>
         <TabsV2.Content value="commands" class="settings-v2-panel">
           <SettingsCommandsV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="schedule" class="settings-v2-panel">
+          <SettingsScheduleV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="hooks" class="settings-v2-panel">
+          <SettingsHooksV2 />
+        </TabsV2.Content>
+        <TabsV2.Content value="memory" class="settings-v2-panel">
+          <SettingsMemoryV2 />
         </TabsV2.Content>
         <TabsV2.Content value="experimental" class="settings-v2-panel">
           <SettingsExperimentalV2 />

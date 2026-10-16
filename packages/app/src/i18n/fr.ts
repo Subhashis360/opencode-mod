@@ -1051,6 +1051,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Exécuter des requêtes de serveur de langage",
   "settings.permissions.tool.todowrite.title": "Écrire les tâches",
   "settings.permissions.tool.todowrite.description": "Mettre à jour la liste de tâches",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Récupération Web",
   "settings.permissions.tool.webfetch.description": "Récupérer le contenu d'une URL",
   "settings.permissions.tool.websearch.title": "Recherche Web",

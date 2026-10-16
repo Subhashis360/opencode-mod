@@ -1125,6 +1125,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Стартувај јазични прашања за серверот",
   "settings.permissions.tool.todowrite.title": "Todo Напиши",
   "settings.permissions.tool.todowrite.description": "Ажурирајте го списокот со задачи",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Веб Преземи",
   "settings.permissions.tool.webfetch.description": "Преземи содржина од URL",
   "settings.permissions.tool.websearch.title": "Пребарување на веб",

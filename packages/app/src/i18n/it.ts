@@ -1043,6 +1043,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Esegui query sul server di linguaggio",
   "settings.permissions.tool.todowrite.title": "Scrittura attività",
   "settings.permissions.tool.todowrite.description": "Aggiorna l'elenco delle attività",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Recupero dal web",
   "settings.permissions.tool.webfetch.description": "Recupera contenuto da un URL",
   "settings.permissions.tool.websearch.title": "Ricerca sul web",

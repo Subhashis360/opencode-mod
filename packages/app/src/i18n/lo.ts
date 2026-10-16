@@ -1107,6 +1107,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "ດໍາເນີນການສອບຖາມເຊີບເວີພາສາ",
   "settings.permissions.tool.todowrite.title": "Todo ຂຽນ",
   "settings.permissions.tool.todowrite.description": "ອັບເດດລາຍການທີ່ຕ້ອງເຮັດ",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "ການດຶງຂໍ້ມູນເວັບ",
   "settings.permissions.tool.webfetch.description": "ເອົາເນື້ອຫາຈາກ URL",
   "settings.permissions.tool.websearch.title": "ຄົ້ນຫາເວັບ",

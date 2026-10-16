@@ -10,7 +10,7 @@ import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 
 export function SessionRevertDock(props: {
-  items: { id: string; text: string }[]
+  items: { id: string; text: string; sent?: boolean }[]
   restoring?: string
   disabled?: boolean
   onRestore: (id: string) => void

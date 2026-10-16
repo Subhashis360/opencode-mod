@@ -1131,6 +1131,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Vykdykite kalbos serverio užklausas",
   "settings.permissions.tool.todowrite.title": "Todo Rašyti",
   "settings.permissions.tool.todowrite.description": "Atnaujinkite darbų sąrašą",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "Gaukite turinį iš URL",
   "settings.permissions.tool.websearch.title": "Interneto paieška",

@@ -1127,6 +1127,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Хэлний серверийн асуулга ажиллуулах",
   "settings.permissions.tool.todowrite.title": "Бичих",
   "settings.permissions.tool.todowrite.description": "Хийх ажлын жагсаалтыг шинэчил",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "URL-аас контент татах",
   "settings.permissions.tool.websearch.title": "Вэб хайлт",

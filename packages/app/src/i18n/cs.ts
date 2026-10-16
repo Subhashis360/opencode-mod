@@ -1122,6 +1122,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Spusťte dotazy na jazykový server",
   "settings.permissions.tool.todowrite.title": "Todo Napište",
   "settings.permissions.tool.todowrite.description": "Aktualizujte seznam úkolů",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "Načíst obsah z URL",
   "settings.permissions.tool.websearch.title": "Vyhledávání na webu",

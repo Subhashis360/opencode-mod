@@ -1118,6 +1118,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Spúšťať dotazy na jazykový server",
   "settings.permissions.tool.todowrite.title": "Zápis do zoznamu úloh",
   "settings.permissions.tool.todowrite.description": "Aktualizovať zoznam úloh",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Načítať z webu",
   "settings.permissions.tool.webfetch.description": "Načítať obsah z URL",
   "settings.permissions.tool.websearch.title": "Vyhľadávanie na webe",

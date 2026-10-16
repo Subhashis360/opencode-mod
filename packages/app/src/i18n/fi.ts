@@ -1019,6 +1019,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Suorita kielipalvelinkyselyt",
   "settings.permissions.tool.todowrite.title": "Tehtävälistan päivitys",
   "settings.permissions.tool.todowrite.description": "Päivitä tehtävälista",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "Nouda sisältöä URL-osoitteesta",
   "settings.permissions.tool.websearch.title": "Verkkohaku",

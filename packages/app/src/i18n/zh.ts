@@ -1087,6 +1087,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "运行语言服务器查询",
   "settings.permissions.tool.todowrite.title": "更新待办",
   "settings.permissions.tool.todowrite.description": "更新待办列表",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "获取网页",
   "settings.permissions.tool.webfetch.description": "从 URL 获取内容",
   "settings.permissions.tool.websearch.title": "网页搜索",

@@ -1135,6 +1135,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "ލޭންގުއޭޖް ސަރވަރ ކިއުއަރީތައް ހިންގުން",
   "settings.permissions.tool.todowrite.title": "ޓޯޑޯ ރައިޓް",
   "settings.permissions.tool.todowrite.description": "ޓޯޑޯ ލިސްޓް އަޕްޑޭޓް ކުރާށެވެ",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "ވެބް ފެޗް",
   "settings.permissions.tool.webfetch.description": "URL އިން ކޮންޓެންޓް ހޯދުން",
   "settings.permissions.tool.websearch.title": "ވެބް ސަރޗް",

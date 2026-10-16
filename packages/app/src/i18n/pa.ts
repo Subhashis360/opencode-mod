@@ -1120,6 +1120,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "بولی دے سرور دے سوالاں نوں چلاؤ",
   "settings.permissions.tool.todowrite.title": "ٹوڈو لکھنا",
   "settings.permissions.tool.todowrite.description": "ٹوڈو لسٹ نوں اپ ڈیٹ کرو",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "ویب فیچ",
   "settings.permissions.tool.webfetch.description": "URL توں مواد لیاو",
   "settings.permissions.tool.websearch.title": "Web Search",

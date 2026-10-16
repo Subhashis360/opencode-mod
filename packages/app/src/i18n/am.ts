@@ -1089,6 +1089,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "የቋንቋ አገልጋይ ጥያቄዎችን አሂድ",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "የሚከናወኑ ሥራዎችን ዝርዝር ያዘምኑ",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "ድር ፈልጎ",
   "settings.permissions.tool.webfetch.description": "ይዘትን ከURL አምጣ",
   "settings.permissions.tool.websearch.title": "ድር ፍለጋ",

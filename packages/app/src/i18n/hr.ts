@@ -1127,6 +1127,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Izvršite upite jezičnog poslužitelja",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "Ažurirajte popis obveza",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "Dohvaćanje sadržaja sa URL",
   "settings.permissions.tool.websearch.title": "Web pretraživanje",

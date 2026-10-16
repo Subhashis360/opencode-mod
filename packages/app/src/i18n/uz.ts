@@ -1129,6 +1129,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Til serveri so'rovlarini ishga tushirish",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "Ishlar ro'yxatini yangilang",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "URL dan kontentni olish",
   "settings.permissions.tool.websearch.title": "Veb-qidiruv",

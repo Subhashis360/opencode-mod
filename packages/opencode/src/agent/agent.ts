@@ -120,6 +120,7 @@ const layer = Layer.effect(
           "*": "allow",
           doom_loop: "ask",
           computer: "ask",
+          schedule: "ask",
           external_directory: {
             "*": "ask",
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),

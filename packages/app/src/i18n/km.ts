@@ -1110,6 +1110,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "ដំណើរការសំណួរម៉ាស៊ីនមេភាសា",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "ធ្វើបច្ចុប្បន្នភាពបញ្ជីការងារត្រូវធ្វើ",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "ការទាញយកគេហទំព័រ",
   "settings.permissions.tool.webfetch.description": "ទាញយកមាតិកាពី URL",
   "settings.permissions.tool.websearch.title": "ការស្វែងរកតាមអ៊ីនធឺណិត",

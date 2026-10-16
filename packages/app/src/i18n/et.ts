@@ -1110,6 +1110,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Käivitage keeleserveri päringuid",
   "settings.permissions.tool.todowrite.title": "Todo Kirjuta",
   "settings.permissions.tool.todowrite.description": "Värskendage ülesannete loendit",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Veebi toomine",
   "settings.permissions.tool.webfetch.description": "Sisu toomine asukohast URL",
   "settings.permissions.tool.websearch.title": "Veebiotsing",

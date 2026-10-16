@@ -1114,6 +1114,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "درخواست های سرور زبان را اجرا کنید",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "لیست کارها را به روز کنید",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "واکشی وب",
   "settings.permissions.tool.webfetch.description": "محتوا را از یک URL واکشی کنید",
   "settings.permissions.tool.websearch.title": "جستجوی وب",

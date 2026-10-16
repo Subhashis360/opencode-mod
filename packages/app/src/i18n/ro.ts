@@ -1121,6 +1121,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Rulează interogări către serverul de limbaj",
   "settings.permissions.tool.todowrite.title": "Scriere Todo",
   "settings.permissions.tool.todowrite.description": "Actualizează lista de sarcini",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Preluare web",
   "settings.permissions.tool.webfetch.description": "Preia conținut de la un URL",
   "settings.permissions.tool.websearch.title": "Căutare web",

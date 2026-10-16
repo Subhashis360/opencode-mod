@@ -1122,6 +1122,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Drejtoni pyetjet e serverit të gjuhës",
   "settings.permissions.tool.todowrite.title": "Todo Shkruani",
   "settings.permissions.tool.todowrite.description": "Përditësoni listën e detyrave",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Marrja në ueb",
   "settings.permissions.tool.webfetch.description": "Merr përmbajtje nga një URL",
   "settings.permissions.tool.websearch.title": "Kërkimi në ueb",

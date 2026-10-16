@@ -1124,6 +1124,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Գործարկել լեզվի սերվերի հարցումները",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "Թարմացնել անելիքների ցուցակը",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Վեբ առբերում",
   "settings.permissions.tool.webfetch.description": "Առբերել բովանդակությունը URL-ից",
   "settings.permissions.tool.websearch.title": "Վեբ որոնում",

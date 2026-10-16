@@ -24,6 +24,14 @@ exports[`tool parameters JSON Schema (wire shape) bash 1`] = `
       "description": "The command to execute",
       "type": "string",
     },
+    "notify_on": {
+      "description": "With run_in_background: a regular expression; you are notified once when an output line matches (e.g. 'ready|listening on')",
+      "type": "string",
+    },
+    "run_in_background": {
+      "description": "Start the command and return at once, for dev servers, watchers and long builds. You are notified when it exits; manage it with the jobs tool. Do not poll or sleep.",
+      "type": "boolean",
+    },
     "timeout": {
       "description": "Optional timeout in milliseconds",
       "exclusiveMinimum": 0,

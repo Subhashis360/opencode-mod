@@ -1115,6 +1115,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "ენის სერვერის მოთხოვნების გაშვება",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "განაახლე სამუშაოების სია",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "კონტენტის მიღება URL",
   "settings.permissions.tool.websearch.title": "ვებ ძიება",

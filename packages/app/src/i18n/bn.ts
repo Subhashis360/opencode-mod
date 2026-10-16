@@ -1111,6 +1111,8 @@ export const dict: Record<string, string> = {
   "settings.permissions.tool.lsp.description": "ভাষা সার্ভার প্রশ্ন চালান",
   "settings.permissions.tool.todowrite.title": "Todo Write",
   "settings.permissions.tool.todowrite.description": "করণীয় তালিকা আপডেট করুন",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "একটি URL থেকে সামগ্রী আনুন",
   "settings.permissions.tool.websearch.title": "Web Search",

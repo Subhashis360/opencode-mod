@@ -18,6 +18,9 @@ import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
 import { controlHandlers } from "../../src/server/routes/instance/httpapi/handlers/control"
 import { controlPlaneHandlers } from "../../src/server/routes/instance/httpapi/handlers/control-plane"
 import { globalHandlers } from "../../src/server/routes/instance/httpapi/handlers/global"
+import { scheduleHandlers } from "../../src/server/routes/instance/httpapi/handlers/schedule"
+import { modToolsHandlers } from "../../src/server/routes/instance/httpapi/handlers/mod-tools"
+import { ScheduleRunner } from "../../src/schedule/runner"
 import { authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
@@ -31,7 +34,7 @@ const called = Ref.makeUnsafe<MoveSession.Input | undefined>(undefined)
 
 const apiLayer = HttpRouter.serve(
   HttpApiBuilder.layer(RootHttpApi).pipe(
-    Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
+    Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers, scheduleHandlers, modToolsHandlers]),
     Layer.provide([authorizationLayer, schemaErrorLayer]),
     // Raw HttpApi routes expose an opaque handler context at the request boundary.
     // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
@@ -40,6 +43,7 @@ const apiLayer = HttpRouter.serve(
   { disableListenLog: true, disableLogger: true },
 ).pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
+  Layer.provide(Layer.mock(ScheduleRunner.Service)({ active: () => Effect.succeed([]) })),
   Layer.provide(Layer.mock(Auth.Service)({})),
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(Layer.mock(Installation.Service)({})),

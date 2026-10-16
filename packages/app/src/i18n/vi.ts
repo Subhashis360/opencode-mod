@@ -1128,6 +1128,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Chạy truy vấn máy chủ ngôn ngữ",
   "settings.permissions.tool.todowrite.title": "Ghi việc cần làm",
   "settings.permissions.tool.todowrite.description": "Cập nhật danh sách việc cần làm",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Tìm nạp web",
   "settings.permissions.tool.webfetch.description": "Tìm nạp nội dung từ URL",
   "settings.permissions.tool.websearch.title": "Tìm kiếm trên web",

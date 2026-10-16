@@ -1134,6 +1134,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "ဘာသာစကားဆာဗာ မေးမြန်းချက်များကို လုပ်ဆောင်ပါ။",
   "settings.permissions.tool.todowrite.title": "Todo ရေးပါ။",
   "settings.permissions.tool.todowrite.description": "လုပ်စရာစာရင်းကို အပ်ဒိတ်လုပ်ပါ။",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "ဝဘ်ထုတ်ယူမှု",
   "settings.permissions.tool.webfetch.description": "URL တစ်ခုမှ အကြောင်းအရာကို ရယူပါ။",
   "settings.permissions.tool.websearch.title": "ဝဘ်ရှာဖွေမှု",

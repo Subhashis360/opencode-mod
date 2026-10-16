@@ -1116,6 +1116,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Jalankan pertanyaan pelayan bahasa",
   "settings.permissions.tool.todowrite.title": "Tulis Todo",
   "settings.permissions.tool.todowrite.description": "Kemas kini senarai tugasan",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Ambil Web",
   "settings.permissions.tool.webfetch.description": "Ambil kandungan dari URL",
   "settings.permissions.tool.websearch.title": "Carian Web",

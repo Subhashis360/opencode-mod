@@ -1033,6 +1033,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "تشغيل استعلامات خادم اللغة",
   "settings.permissions.tool.todowrite.title": "كتابة المهام",
   "settings.permissions.tool.todowrite.description": "تحديث قائمة المهام",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "جلب الويب",
   "settings.permissions.tool.webfetch.description": "جلب محتوى من عنوان URL",
   "settings.permissions.tool.websearch.title": "بحث الويب",

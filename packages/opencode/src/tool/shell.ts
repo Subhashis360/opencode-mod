@@ -20,6 +20,9 @@ import { Plugin } from "@/plugin"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
+import { BackgroundShell } from "@/mod/background-shell"
+import { EffectBridge } from "@/effect/bridge"
+import type { TaskPromptOps } from "./task"
 import { BashArity } from "@/permission/arity"
 
 export { Parameters } from "./shell/prompt"
@@ -627,6 +630,39 @@ export const ShellTool = Tool.define(
                   yield* ask(ctx, scan, params)
                 }),
               )
+
+              if (params.run_in_background) {
+                const ops = ctx.extra?.promptOps as TaskPromptOps | undefined
+                const bridge = yield* EffectBridge.make()
+                if (params.notify_on) new RegExp(params.notify_on)
+                const job = yield* Effect.promise(() =>
+                  BackgroundShell.start({
+                    shell,
+                    command: params.command,
+                    cwd,
+                    env: process.env,
+                    sessionID: ctx.sessionID,
+                    notifyOn: params.notify_on,
+                    wake: (text) => {
+                      if (!ops) return
+                      bridge.fork(
+                        ops
+                          .prompt({
+                            sessionID: ctx.sessionID,
+                            agent: ctx.agent,
+                            parts: [{ type: "text", synthetic: true, text }],
+                          })
+                          .pipe(Effect.ignore),
+                      )
+                    },
+                  }),
+                )
+                return {
+                  title: params.command,
+                  metadata: { output: `background job ${job.id}`, exit: null, truncated: false },
+                  output: `Started background job ${job.id}. Output goes to ${job.log}. You will be notified when it exits${params.notify_on ? " or prints a matching line" : ""}; use the jobs tool to see output or stop it.`,
+                }
+              }
 
               return yield* run(
                 {

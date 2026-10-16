@@ -19,6 +19,14 @@ export function parameterSchema() {
     workdir: Schema.optional(Schema.String).annotate({
       description: `The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.`,
     }),
+    run_in_background: Schema.optional(Schema.Boolean).annotate({
+      description:
+        "Start the command and return at once, for dev servers, watchers and long builds. You are notified when it exits; manage it with the jobs tool. Do not poll or sleep.",
+    }),
+    notify_on: Schema.optional(Schema.String).annotate({
+      description:
+        "With run_in_background: a regular expression; you are notified once when an output line matches (e.g. 'ready|listening on')",
+    }),
   })
 }
 

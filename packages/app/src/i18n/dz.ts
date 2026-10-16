@@ -1139,6 +1139,8 @@ export const dict: Record<string, string> = {
   "settings.permissions.tool.lsp.description": "སྐད་ཡིག་སར་བར་གྱི་འདྲི་དཔྱད་ཚུ་གཡོག་བཀོལ།",
   "settings.permissions.tool.todowrite.title": "Todo Write།",
   "settings.permissions.tool.todowrite.description": "འབད་དགོ་པའི་ཐོ་ཡིག་དུས་མཐུན་བཟོ།",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch།",
   "settings.permissions.tool.webfetch.description": "URLནང་ལས་ནང་དོན་ལེན།",
   "settings.permissions.tool.websearch.title": "Web Search",

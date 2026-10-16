@@ -1118,6 +1118,8 @@ export const dict = {
   "settings.permissions.tool.lsp.description": "Dil serweriniň talaplaryny işlediň",
   "settings.permissions.tool.todowrite.title": "Todo ýaz",
   "settings.permissions.tool.todowrite.description": "Todo sanawyny täzeläň",
+  "settings.permissions.tool.computer.title": "Computer use",
+  "settings.permissions.tool.computer.description": "Control the mouse, keyboard and screen in this app",
   "settings.permissions.tool.webfetch.title": "Web Fetch",
   "settings.permissions.tool.webfetch.description": "Mazmuny URL-den alyň",
   "settings.permissions.tool.websearch.title": "Web gözlegi",
