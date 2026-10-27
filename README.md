@@ -1,5 +1,7 @@
 <div align="center">
 
+**English** · [简体中文](docs/readme/README_zh.md) · [日本語](docs/readme/README_ja.md) · [한국어](docs/readme/README_ko.md) · [हिन्दी](docs/readme/README_hi.md)
+
 # OpenCode Mod: the OpenCode Extension
 
 ### One plugin that gives OpenCode Desktop computer use, a provider editor, ready-made agents and automation.
@@ -11,6 +13,8 @@
 [![Computer use](https://img.shields.io/badge/computer_use-Windows_·_Android-22d3ee?style=flat-square)](#computer-use-in-opencode)
 [![GitHub stars](https://img.shields.io/github/stars/Subhashis360/opencode-mod?style=flat-square&color=f5c542)](https://github.com/Subhashis360/opencode-mod/stargazers)
 [![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
+
+**[Install in one prompt](#ask-your-agent) · [Screenshots](#highlights) · [Report a bug](https://github.com/Subhashis360/opencode-mod/issues)**
 
 [Quick start](#quick-start) · [How it works](#how-it-works) · [What it adds](#what-the-opencode-extension-adds) · [Highlights](#highlights) · [FAQ](#faq) · [Build from source](#build-from-source)
 
@@ -27,7 +31,7 @@
 
 <br />
 
-<img src="assets/hero.png" alt="OpenCode Mod, an OpenCode extension: the Settings → Mod page in OpenCode Desktop with Agents, System prompt, Commands, Memory, MCP servers, Computer use, Hooks, Permissions, Providers, Session limits, Scheduled and Experimental tabs, and the agent template list" width="1200" />
+<img src="assets/hero.png" alt="OpenCode Mod, an OpenCode extension: the Settings → Mod page in OpenCode Desktop with Agents, System prompt, Commands, Memory, MCP servers, Computer use, Hooks, Permissions, Providers, Session limits, Scheduled and Experimental tabs, and the agent template list" width="820" />
 
 <br /><br />
 
@@ -115,25 +119,25 @@ You talk to your agent as usual. When it needs your desktop it calls the `comput
 
 ### Edit any provider and fetch its models
 
-<img src="assets/providers.png" alt="Edit a custom provider in OpenCode and fetch its models: the OpenCode extension's Providers editor with base URL, API key, headers, and 464 models fetched from OpenRouter, three selected" width="1200" />
+<img src="assets/providers.png" alt="Edit a custom provider in OpenCode and fetch its models: the OpenCode extension's Providers editor with base URL, API key, headers, and 464 models fetched from OpenRouter, three selected" width="820" />
 
 OpenCode's own Providers page can only rename or remove a provider. **Mod → Providers** (or **Edit custom providers** in the command palette) edits the base URL, API key, headers and AI SDK package of any OpenAI-compatible provider, and **fetches its model list** so you only tick the models you want. It has templates for OpenRouter, Ollama, LM Studio, NVIDIA NIM and Together. Fetching uses the key you typed or the one you already connected in OpenCode, and runs through OpenCode's local server, so the provider's CORS rules don't block it.
 
 ### Computer use in OpenCode
 
-<img src="assets/computer-use.png" alt="Computer use for OpenCode: the extension's Computer use settings with switches for computer use, background clicking without the mouse, the screen glow and a glow color picker" width="1200" />
+<img src="assets/computer-use.png" alt="Computer use for OpenCode: the extension's Computer use settings with switches for computer use, background clicking without the mouse, the screen glow and a glow color picker" width="820" />
 
 The agent opens apps, reads windows, clicks, types and checks its own work, on Windows and on Android phones over `adb`. It reads windows as numbered text first, which is faster and works with text-only models. With **Don't use my cursor** on, it presses buttons through accessibility while you keep using your mouse. A glow outlines the app it is using and disappears when the run ends. Screenshot files are deleted as soon as they are read, and older screenshots are dropped from the conversation so every step stays quick.
 
 ### Pentest and bug bounty agents in two clicks
 
-<img src="assets/agents.png" alt="Custom pentesting agent for OpenCode: the Bug Bounty Assistant template in the OpenCode extension's agent editor, with its system prompt, model, color and tool limits" width="1200" />
+<img src="assets/agents.png" alt="Custom pentesting agent for OpenCode: the Bug Bounty Assistant template in the OpenCode extension's agent editor, with its system prompt, model, color and tool limits" width="820" />
 
 **Security Auditor** reviews code for vulnerabilities without changing it and reports each finding with severity, location and fix. **Bug Bounty Assistant** is for authorized pentests, bug bounty programs and CTFs: it plans recon and test cases, builds minimal proofs of concept and writes findings in report format, asking before it runs commands. Code Reviewer, Debugger, Test Writer, Architect and Docs Writer cover everyday work.
 
 ### A faster agent: Parallel web search and warm sessions
 
-<img src="assets/speed.png" alt="Make OpenCode faster: the extension's Speed settings with keep sessions warm, the web search provider dropdown (Parallel, Exa, Tavily, rotate), background compaction, snapshots and compact media storage" width="1200" />
+<img src="assets/speed.png" alt="Make OpenCode faster: the extension's Speed settings with keep sessions warm, the web search provider dropdown (Parallel, Exa, Tavily, rotate), background compaction, snapshots and compact media storage" width="820" />
 
 **Mod → Experimental → Speed** brings together the settings that make OpenCode respond faster. You can switch web search to [Parallel](https://parallel.ai), Exa or Tavily, or rotate between them when one is rate limited. You can also keep recent sessions' prompt caches warm, summarize long chats in the background, turn off undo snapshots in big projects, store media compactly, and cap tool output.
 
