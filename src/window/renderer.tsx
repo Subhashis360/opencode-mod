@@ -2,6 +2,7 @@ import { Command, type Plugin, SettingsPage, Style } from "@opencode/plugin/gui"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import type definition from "./index"
 import Page, { requestTab } from "./page"
+import { registerPending } from "./pending"
 import { css } from "./style"
 
 const setup: Plugin.Setup<typeof definition> = (ctx) => {
@@ -9,6 +10,7 @@ const setup: Plugin.Setup<typeof definition> = (ctx) => {
   const queries = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } })
 
   ctx.add(Style, css)
+  registerPending(ctx)
 
   ctx.add(SettingsPage, {
     id: "mod",
