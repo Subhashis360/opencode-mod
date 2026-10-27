@@ -1,0 +1,56 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Threading;
+using Windows.Globalization;
+using Windows.Graphics.Imaging;
+using Windows.Media.Ocr;
+using Windows.Security.Cryptography;
+
+namespace OpencodeComputer {
+  // Windows' own offline OCR engine (the one Snipping Tool uses). It reads any app that draws text,
+  // including games, canvases and remote desktops that expose no accessibility tree, in tens of ms.
+  public static class TextReader {
+    static OcrEngine engine;
+
+    public static object Read(Bitmap bitmap) {
+      if (engine == null) engine = OcrEngine.TryCreateFromUserProfileLanguages() ?? OcrEngine.TryCreateFromLanguage(new Language("en-US"));
+      if (engine == null) throw new Exception("Windows has no OCR language installed (Settings > Time & language > Language)");
+      byte[] bytes;
+      var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+      try {
+        bytes = new byte[bitmap.Width * bitmap.Height * 4];
+        for (var y = 0; y < bitmap.Height; y++) Marshal.Copy(data.Scan0 + y * data.Stride, bytes, y * bitmap.Width * 4, bitmap.Width * 4);
+      } finally { bitmap.UnlockBits(data); }
+      var image = new SoftwareBitmap(BitmapPixelFormat.Bgra8, bitmap.Width, bitmap.Height, BitmapAlphaMode.Premultiplied);
+      image.CopyFromBuffer(CryptographicBuffer.CreateFromByteArray(bytes));
+      var operation = engine.RecognizeAsync(image);
+      var waited = 0;
+      while (operation.Status == Windows.Foundation.AsyncStatus.Started) {
+        if (waited++ > 8000) { operation.Cancel(); throw new Exception("OCR took too long"); }
+        Thread.Sleep(1);
+      }
+      var result = operation.GetResults();
+      // When the engine decides the text is tilted it reports boxes in its straightened frame; turn them
+      // back so positions land on the real pixels.
+      var angle = result.TextAngle.HasValue ? result.TextAngle.Value * Math.PI / 180 : 0;
+      double cos = Math.Cos(angle), sin = Math.Sin(angle), cx = bitmap.Width / 2.0, cy = bitmap.Height / 2.0;
+      var lines = new List<object>();
+      foreach (var line in result.Lines) {
+        var words = new List<object>();
+        foreach (var word in line.Words) {
+          var r = word.BoundingRect;
+          double mx = r.X + r.Width / 2 - cx, my = r.Y + r.Height / 2 - cy;
+          double x = cx + mx * cos - my * sin - r.Width / 2, y = cy + mx * sin + my * cos - r.Height / 2;
+          words.Add(new Dictionary<string, object> {
+            { "text", word.Text }, { "x", x }, { "y", y }, { "w", r.Width }, { "h", r.Height },
+          });
+        }
+        lines.Add(new Dictionary<string, object> { { "text", line.Text }, { "words", words.ToArray() } });
+      }
+      return lines.ToArray();
+    }
+  }
+}

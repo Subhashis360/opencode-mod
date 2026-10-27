@@ -1,0 +1,276 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace OpencodeComputer {
+  // A soft glow around every display while the agent drives the computer. The glow is four thin bands per display:
+  // click-through tool windows that Windows leaves out of screen capture, so the agent's screenshots, OCR and hit
+  // tests never see them. They run on their own UI thread so the helper's request loop is never held up.
+  public static class Aurora {
+    [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
+    [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr dst, ref PT pos, ref SZ size, IntPtr src, ref PT srcPos, int key, ref BLEND blend, int flags);
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT value, int size);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref BITMAPINFOHEADER info, uint usage, out IntPtr bits, IntPtr section, uint offset);
+
+    [StructLayout(LayoutKind.Sequential)] struct PT { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct SZ { public int W; public int H; }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)] struct BLEND { public byte Op; public byte Flags; public byte Alpha; public byte Format; }
+    [StructLayout(LayoutKind.Sequential)] struct BITMAPINFOHEADER {
+      public int Size; public int Width; public int Height; public short Planes; public short BitCount; public int Compression;
+      public int SizeImage; public int XPels; public int YPels; public int ClrUsed; public int ClrImportant;
+    }
+
+    const int STEPS = 1024; // a power of two, so wrapping is a mask
+    const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
+
+    static Thread thread;
+    static SynchronizationContext ui;
+    static System.Windows.Forms.Timer timer;
+    static readonly List<Band> bands = new List<Band>();
+    static string layout = "";
+    static byte[] red = new byte[STEPS], green = new byte[STEPS], blue = new byte[STEPS];
+    static readonly byte[] scale = new byte[256];
+    static int frame;
+    static bool on;
+    // The window the agent works in, outlined while it is on screen, and the display to outline otherwise.
+    static IntPtr follow = IntPtr.Zero;
+    static Rectangle? fallback;
+
+    // colors: the palette as 0xRRGGBB stops that flow around the edges. window: the app window the agent works in;
+    // the glow outlines it and follows it when it moves. area: the display the agent works on, in screen pixels,
+    // outlined when there is no such window on screen (every display when that is missing too). Returns whether the
+    // glow is showing.
+    public static object Set(bool show, List<int> colors, Rectangle? area, IntPtr window) {
+      Start();
+      string error = null;
+      using (var done = new ManualResetEvent(false)) {
+        ui.Post(delegate {
+          try { if (show) Show(colors, area, window); else Hide(); } catch (Exception e) { error = e.Message; Hide(); }
+          done.Set();
+        }, null);
+        if (!done.WaitOne(5000)) error = "The glow did not respond";
+      }
+      if (error != null) throw new Exception(error);
+      return on;
+    }
+
+    static void Start() {
+      if (thread != null) return;
+      using (var ready = new ManualResetEvent(false)) {
+        thread = new Thread(delegate () {
+          SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+          ui = SynchronizationContext.Current;
+          timer = new System.Windows.Forms.Timer { Interval = 50 };
+          timer.Tick += delegate { try { Frame(); } catch { Hide(); } };
+          ready.Set();
+          Application.Run();
+        });
+        thread.IsBackground = true;
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        ready.WaitOne();
+      }
+    }
+
+    static void Show(List<int> colors, Rectangle? area, IntPtr window) {
+      Palette(colors == null || colors.Count == 0 ? new List<int> { 0x22D3EE } : colors);
+      follow = window;
+      fallback = area;
+      Arrange();
+      // Without the capture exclusion (Windows 10 before 2004) the agent would see the glow in its own screenshots,
+      // so then it stays off.
+      foreach (var band in bands)
+        if (!band.Hidden) throw new Exception("This version of Windows cannot hide the glow from screenshots");
+      on = true;
+      Frame();
+      timer.Start();
+    }
+
+    // What to outline: the working window while it is open, visible and not minimized (its visible frame, without
+    // the invisible resize borders), else the working display.
+    static List<Rectangle> Targets() {
+      RECT r;
+      if (follow != IntPtr.Zero && IsWindow(follow) && IsWindowVisible(follow) && !IsIconic(follow) &&
+          DwmGetWindowAttribute(follow, 9, out r, Marshal.SizeOf(typeof(RECT))) == 0 &&
+          r.Right - r.Left >= 120 && r.Bottom - r.Top >= 120)
+        return new List<Rectangle> { Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom) };
+      var screens = Screen.AllScreens.Select(s => s.Bounds).ToList();
+      if (fallback.HasValue) {
+        var center = new Point(fallback.Value.X + fallback.Value.Width / 2, fallback.Value.Y + fallback.Value.Height / 2);
+        var match = screens.Where(b => b.Contains(center)).ToList();
+        if (match.Count > 0) return match;
+      }
+      return screens;
+    }
+
+    // Rebuilds the bands when what to outline moved or changed size.
+    static void Arrange() {
+      var targets = Targets();
+      var now = string.Join(";", targets.Select(t => t.ToString()).ToArray());
+      if (now == layout) return;
+      Clear();
+      foreach (var b in targets) {
+        var t = Thickness(b);
+        bands.Add(new Band(b, new Rectangle(b.X, b.Y, b.Width, t)));
+        bands.Add(new Band(b, new Rectangle(b.X, b.Bottom - t, b.Width, t)));
+        bands.Add(new Band(b, new Rectangle(b.X, b.Y + t, t, b.Height - 2 * t)));
+        bands.Add(new Band(b, new Rectangle(b.Right - t, b.Y + t, t, b.Height - 2 * t)));
+      }
+      layout = now;
+    }
+
+    static int Thickness(Rectangle outline) {
+      return Math.Max(16, (int)(Math.Min(outline.Width, outline.Height) * 0.045));
+    }
+
+    static void Hide() {
+      on = false;
+      if (timer != null) timer.Stop();
+      foreach (var band in bands) if (band.Visible) band.Hide();
+    }
+
+    static void Clear() {
+      foreach (var band in bands) band.Dispose();
+      bands.Clear();
+      layout = "";
+    }
+
+    // Interpolates the stops into a looping strip of STEPS colors. A single color becomes a few nearby shades of
+    // itself, so a picked color still shimmers.
+    static void Palette(List<int> stops) {
+      if (stops.Count == 1) {
+        var c = stops[0];
+        stops = new List<int> { c, Shade(c, 1.35), c, Shade(c, 0.7) };
+      }
+      for (var i = 0; i < STEPS; i++) {
+        var p = (double)i / STEPS * stops.Count;
+        var k = (int)p;
+        var f = p - k;
+        f = f * f * (3 - 2 * f);
+        int a = stops[k % stops.Count], b = stops[(k + 1) % stops.Count];
+        red[i] = Mix(a >> 16, b >> 16, f);
+        green[i] = Mix(a >> 8, b >> 8, f);
+        blue[i] = Mix(a, b, f);
+      }
+    }
+
+    static int Shade(int c, double k) {
+      Func<int, int> ch = v => Math.Min(255, (int)((v & 255) * k + (k > 1 ? 40 : 0)));
+      return (ch(c >> 16) << 16) | (ch(c >> 8) << 8) | ch(c);
+    }
+
+    static byte Mix(int a, int b, double f) {
+      return (byte)Math.Round((a & 255) + ((b & 255) - (a & 255)) * f);
+    }
+
+    static void Frame() {
+      if (!on) return;
+      frame++;
+      // At 20 frames a second the colors drift around the screen in six seconds and the glow breathes every three.
+      var offset = frame % 120 * STEPS / 120;
+      var k = 0.8 + 0.2 * Math.Sin(frame * 2 * Math.PI / 60);
+      for (var a = 0; a < 256; a++) scale[a] = (byte)(a * k);
+      // A followed window is checked ten times a second, so the outline keeps up when it moves or resizes.
+      if (follow != IntPtr.Zero && frame % 2 == 0) {
+        Arrange();
+        if (bands.Any(band => !band.Hidden)) { Hide(); return; }
+      }
+      foreach (var band in bands) band.Render(offset);
+      foreach (var band in bands) if (!band.Visible) band.Show();
+    }
+
+    sealed class Band : Form {
+      readonly Rectangle area;
+      readonly ushort[] spot;
+      readonly byte[] alpha;
+      readonly int[] pixels;
+      IntPtr dc, bitmap, old, bits;
+      public bool Hidden;
+
+      public Band(Rectangle screen, Rectangle area) {
+        this.area = area;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        AutoScaleMode = AutoScaleMode.None;
+        TopMost = true;
+        Bounds = area;
+        int w = area.Width, h = area.Height, sw = screen.Width, sh = screen.Height;
+        var t = Thickness(screen);
+        var perimeter = 2.0 * (sw + sh);
+        spot = new ushort[w * h];
+        alpha = new byte[w * h];
+        pixels = new int[w * h];
+        for (var y = 0; y < h; y++)
+          for (var x = 0; x < w; x++) {
+            int sx = area.X - screen.X + x, sy = area.Y - screen.Y + y;
+            int top = sy, right = sw - 1 - sx, bottom = sh - 1 - sy, left = sx;
+            var d = Math.Min(Math.Min(top, bottom), Math.Min(left, right));
+            // Where along the screen's edge this pixel sits, clockwise from the top-left corner.
+            double along = d == top ? sx : d == right ? sw + sy : d == bottom ? sw + sh + (sw - sx) : 2 * sw + sh + (sh - sy);
+            var u = (double)d / t;
+            spot[y * w + x] = (ushort)((int)(along / perimeter * STEPS) % STEPS);
+            alpha[y * w + x] = u >= 1 ? (byte)0 : (byte)(235 * Math.Pow(1 - u, 2.3));
+          }
+        var screenDC = GetDC(IntPtr.Zero);
+        dc = CreateCompatibleDC(screenDC);
+        ReleaseDC(IntPtr.Zero, screenDC);
+        var info = new BITMAPINFOHEADER { Size = Marshal.SizeOf(typeof(BITMAPINFOHEADER)), Width = w, Height = -h, Planes = 1, BitCount = 32 };
+        bitmap = CreateDIBSection(dc, ref info, 0, out bits, IntPtr.Zero, 0);
+        old = SelectObject(dc, bitmap);
+        CreateHandle();
+        Hidden = SetWindowDisplayAffinity(Handle, WDA_EXCLUDEFROMCAPTURE);
+      }
+
+      protected override bool ShowWithoutActivation { get { return true; } }
+
+      protected override CreateParams CreateParams {
+        get {
+          var p = base.CreateParams;
+          // layered | click-through | tool window (no taskbar, no alt-tab) | topmost | never takes focus
+          p.ExStyle |= 0x80000 | 0x20 | 0x80 | 0x8 | 0x08000000;
+          return p;
+        }
+      }
+
+      public void Render(int offset) {
+        for (var i = 0; i < pixels.Length; i++) {
+          var a = scale[alpha[i]];
+          if (a == 0) { pixels[i] = 0; continue; }
+          var c = (spot[i] + offset) & (STEPS - 1);
+          pixels[i] = (a << 24) | (red[c] * a / 255 << 16) | (green[c] * a / 255 << 8) | (blue[c] * a / 255);
+        }
+        Marshal.Copy(pixels, 0, bits, pixels.Length);
+        var pos = new PT { X = area.X, Y = area.Y };
+        var size = new SZ { W = area.Width, H = area.Height };
+        var zero = new PT();
+        var blend = new BLEND { Op = 0, Flags = 0, Alpha = 255, Format = 1 };
+        UpdateLayeredWindow(Handle, IntPtr.Zero, ref pos, ref size, dc, ref zero, 0, ref blend, 2);
+      }
+
+      protected override void Dispose(bool disposing) {
+        if (dc != IntPtr.Zero) {
+          SelectObject(dc, old);
+          DeleteObject(bitmap);
+          DeleteDC(dc);
+          dc = IntPtr.Zero;
+        }
+        base.Dispose(disposing);
+      }
+    }
+  }
+}

@@ -1,0 +1,1021 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Drawing.Text;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Windows.Automation;
+using System.Windows.Forms;
+
+namespace OpencodeComputer {
+  // The screen map: every control and every piece of visible text on a display with its kind, name, state, the
+  // group it sits in and its exact rectangle, so the model acts on an element instead of estimating pixels from
+  // a picture. Controls come from UI Automation; text that apps draw themselves (canvases, games, web content
+  // without accessibility) comes from Windows' own OCR, which runs at the same time.
+  public static partial class Host {
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int command);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
+    static readonly HashSet<string> Clickable = new HashSet<string> {
+      "button", "checkbox", "combobox", "edit", "hyperlink", "listitem", "menuitem", "radiobutton", "slider",
+      "spinner", "splitbutton", "tabitem", "treeitem", "dataitem", "headeritem", "document",
+    };
+    static readonly HashSet<string> Readable = new HashSet<string> { "text", "image", "progressbar", "header" };
+    static readonly HashSet<string> Containers = new HashSet<string> {
+      "group", "pane", "window", "tab", "toolbar", "menubar", "menu", "list", "tree", "table", "datagrid",
+      "document", "statusbar", "custom", "header",
+    };
+
+    class Box { public IntPtr Win; public string Name; public Rectangle Rect; }
+
+    class MapState {
+      public Rectangle Area;
+      public int Limit;
+      public bool Hidden;
+      public volatile bool Stop;
+      public readonly List<Dictionary<string, object>> Items = new List<Dictionary<string, object>>();
+      public readonly List<Box> Boxes = new List<Box>();
+      public readonly HashSet<string> Seen = new HashSet<string>();
+    }
+
+    static Bitmap lastShot;
+    static Rectangle lastArea;
+    static readonly Dictionary<uint, string> ProcessNames = new Dictionary<uint, string>();
+
+    static object See(Dictionary<string, object> r) {
+      var clock = Stopwatch.StartNew();
+      var area = new Rectangle(Int(r, "x"), Int(r, "y"), Int(r, "width"), Int(r, "height"));
+      var skip = (Str(r, "skip") ?? "").ToLowerInvariant();
+      var pids = Pids(r);
+      var image = Bool(r, "image");
+      var ocr = Str(r, "ocr") ?? "auto";
+      var single = Str(r, "scope") == "window";
+      var budget = Int(r, "budget", 900);
+      var target = Pick(r);
+      if (single) {
+        if (target == IntPtr.Zero) throw new Exception("No app window found; open the app first");
+        area = Rectangle.Intersect(WindowRect(target), SystemInformation.VirtualScreen);
+        if (area.Width < 2 || area.Height < 2) throw new Exception("The app window is off screen or minimized");
+      }
+      Settle(area, Int(r, "settle", 0));
+      var settled = clock.ElapsedMilliseconds;
+      var windows = single ? new List<IntPtr> { target } : Stack(area, skip, pids, target, Int(r, "windows", 8));
+      // One app is read even where other windows cover it (its controls can still be pressed through accessibility);
+      // the whole screen lists only what can be seen.
+      var state = new MapState { Area = area, Limit = Int(r, "limit", 500), Hidden = single };
+      var uia = Start(() => { foreach (var hwnd in windows) { if (state.Stop) break; Collect(hwnd, state); } });
+
+      Bitmap shot = image || ocr == "on" || (ocr == "auto" && !single) ? Grab(area) : null;
+      List<Dictionary<string, object>> words = null;
+      string ocrStatus = "off";
+      Thread reader = null;
+      if (shot != null && ocr != "off") {
+        var copy = shot.Clone(new Rectangle(0, 0, shot.Width, shot.Height), PixelFormat.Format32bppArgb);
+        // Full size keeps the whole-screen read quick (most of the time is OCR); text found this way is checked again
+        // enlarged before anything acts on it.
+        var ocrScale = Double(r, "ocrScale", 1);
+        reader = Start(() => { using (copy) words = ReadSafe(copy, area, ocrScale, out ocrStatus); });
+      }
+      if (!uia.Join(budget)) state.Stop = true;
+      List<Dictionary<string, object>> items;
+      List<Box> boxes;
+      lock (state) { items = state.Items.ToList(); boxes = state.Boxes.ToList(); }
+      // An app that draws its own UI exposes almost no controls, so its text is read with OCR instead.
+      if (reader == null && ocr == "auto" && single && items.Count(i => ((string)i["name"]).Length > 0) < 8) {
+        using (var window = Grab(area)) words = ReadSafe(window, area, 1.5, out ocrStatus);
+      }
+      if (reader != null && !reader.Join(4000)) ocrStatus = "too slow";
+      if (words != null) items.AddRange(MergeText(words, items, boxes, area, skip, pids, single ? target : IntPtr.Zero));
+
+      if (lastShot != null) lastShot.Dispose();
+      lastShot = image ? shot : null;
+      lastArea = area;
+      if (!image && shot != null) shot.Dispose();
+      return new Dictionary<string, object> {
+        { "area", Rect(area) }, { "items", items.ToArray() }, { "partial", state.Stop },
+        { "windows", windows.Take(10).Select(Window).Where(w => w != null).ToArray() },
+        { "front", Window(GetForegroundWindow()) }, { "target", target == IntPtr.Zero ? null : Window(target) },
+        { "ocr", ocrStatus }, { "ms", (int)clock.ElapsedMilliseconds }, { "settle", (int)settled },
+      };
+    }
+
+    // Draws the numbered marks the tool assigned onto the frame See captured and saves it as a JPEG.
+    static object Draw(Dictionary<string, object> r) {
+      var shot = lastShot;
+      var area = lastArea;
+      lastShot = null;
+      if (shot == null) {
+        area = new Rectangle(Int(r, "x"), Int(r, "y"), Int(r, "width"), Int(r, "height"));
+        shot = Grab(area);
+      }
+      int tw = Int(r, "targetWidth"), th = Int(r, "targetHeight");
+      using (shot)
+      using (var frame = new Bitmap(tw, th, PixelFormat.Format24bppRgb)) {
+        using (var g = Graphics.FromImage(frame)) {
+          g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+          g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+          g.DrawImage(shot, 0, 0, tw, th);
+          object marks;
+          if (r.TryGetValue("marks", out marks) && marks is object[]) Mark(g, (object[])marks, area, tw / (double)area.Width, th / (double)area.Height);
+        }
+        var codec = ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+        var options = new EncoderParameters(1);
+        options.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 85L);
+        frame.Save(Str(r, "path"), codec, options);
+      }
+      return null;
+    }
+
+    // A picture from elsewhere (a phone's screencap): cropped, scaled to the model's frame, marked and saved as a
+    // JPEG, the same way desktop screenshots are.
+    static object Image(Dictionary<string, object> r) {
+      using (var source = new Bitmap(Str(r, "src"))) {
+        var crop = r.ContainsKey("cw") ? new Rectangle(Int(r, "cx"), Int(r, "cy"), Int(r, "cw"), Int(r, "ch")) : new Rectangle(0, 0, source.Width, source.Height);
+        crop = Rectangle.Intersect(crop, new Rectangle(0, 0, source.Width, source.Height));
+        int tw = Int(r, "targetWidth"), th = Int(r, "targetHeight");
+        using (var frame = new Bitmap(tw, th, PixelFormat.Format24bppRgb)) {
+          using (var g = Graphics.FromImage(frame)) {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.DrawImage(source, new Rectangle(0, 0, tw, th), crop, GraphicsUnit.Pixel);
+            object marks;
+            if (r.TryGetValue("marks", out marks) && marks is object[]) Mark(g, (object[])marks, crop, tw / (double)crop.Width, th / (double)crop.Height);
+          }
+          var codec = ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+          var options = new EncoderParameters(1);
+          options.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 85L);
+          frame.Save(Str(r, "path"), codec, options);
+        }
+      }
+      return null;
+    }
+
+    // OCR phrases of a picture file, in its own pixels.
+    static object ReadImage(Dictionary<string, object> r) {
+      using (var source = new Bitmap(Str(r, "src"))) {
+        var area = new Rectangle(0, 0, source.Width, source.Height);
+        return ReadText(source, area, Double(r, "scale", 1)).ToArray();
+      }
+    }
+
+    static double Double(Dictionary<string, object> r, string key, double fallback) {
+      object value;
+      return r.TryGetValue(key, out value) && value != null ? Convert.ToDouble(value) : fallback;
+    }
+
+    static readonly Color[] Palette = {
+      Color.FromArgb(225, 29, 72), Color.FromArgb(37, 99, 235), Color.FromArgb(22, 163, 74),
+      Color.FromArgb(147, 51, 234), Color.FromArgb(234, 88, 12), Color.FromArgb(8, 145, 178),
+    };
+
+    static void Mark(Graphics g, object[] marks, Rectangle area, double sx, double sy) {
+      g.SmoothingMode = SmoothingMode.None;
+      g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+      using (var font = new Font("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Pixel)) {
+        foreach (Dictionary<string, object> mark in marks) {
+          var number = Int(mark, "ref");
+          var color = Palette[number % Palette.Length];
+          var x = (float)((Int(mark, "x") - area.X) * sx);
+          var y = (float)((Int(mark, "y") - area.Y) * sy);
+          var w = Math.Max(2f, (float)(Int(mark, "w") * sx));
+          var h = Math.Max(2f, (float)(Int(mark, "h") * sy));
+          using (var pen = new Pen(Color.FromArgb(200, color), 1.5f)) g.DrawRectangle(pen, x, y, w, h);
+          var label = number.ToString();
+          var size = g.MeasureString(label, font);
+          // Tags sit beside small elements (a line of text, a list row) so they never hide the text itself, and
+          // straddle the top-left corner of larger ones, where they cover as little as possible.
+          var tag = new RectangleF(x - 1, Math.Max(0, y - size.Height / 2), size.Width + 1, size.Height - 1);
+          if (h < size.Height * 1.6) {
+            if (x - size.Width - 2 >= 0) tag = new RectangleF(x - size.Width - 2, y + h / 2 - size.Height / 2, size.Width + 1, size.Height - 1);
+            else if (y - size.Height >= 0) tag = new RectangleF(x, y - size.Height, size.Width + 1, size.Height - 1);
+          }
+          using (var fill = new SolidBrush(Color.FromArgb(225, color))) g.FillRectangle(fill, tag);
+          g.DrawString(label, font, Brushes.White, tag.X + 1, tag.Y - 1);
+        }
+      }
+    }
+
+    // Windows on the display from top to bottom, the working app first. Windows fully covered by others are left
+    // out, because none of their controls could be seen or clicked.
+    static List<IntPtr> Stack(Rectangle area, string skip, HashSet<int> pids, IntPtr target, int most) {
+      var list = new List<IntPtr>();
+      var bars = new List<IntPtr>();
+      EnumWindows((hwnd, data) => {
+        if (!Shown(hwnd, skip, pids)) return true;
+        var rect = Rectangle.Intersect(WindowRect(hwnd), area);
+        if (rect.Width < 4 || rect.Height < 4 || !Peeks(hwnd, rect)) return true;
+        var cls = ClassOf(hwnd);
+        if (cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd") bars.Add(hwnd); else list.Add(hwnd);
+        return true;
+      }, IntPtr.Zero);
+      if (target != IntPtr.Zero && list.Remove(target)) list.Insert(0, target);
+      return list.Take(most).Concat(bars).ToList();
+    }
+
+    static bool Shown(IntPtr hwnd, string skip, HashSet<int> pids) {
+      if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return false;
+      if ((GetWindowLong(hwnd, -20) & 0x20) != 0) return false;
+      int cloaked;
+      if (DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0) return false;
+      var cls = ClassOf(hwnd);
+      if (cls == "Progman" || cls == "WorkerW") return false;
+      return !Own(hwnd, skip, pids);
+    }
+
+    static bool Own(IntPtr hwnd, string skip, HashSet<int> pids) {
+      uint pid;
+      GetWindowThreadProcessId(hwnd, out pid);
+      if (pids.Contains((int)pid)) return true;
+      return skip.Length > 0 && ProcessName(pid).ToLowerInvariant().Contains(skip);
+    }
+
+    static string ProcessName(uint pid) {
+      string name;
+      if (ProcessNames.TryGetValue(pid, out name)) return name;
+      try { name = Process.GetProcessById((int)pid).ProcessName; } catch { name = ""; }
+      ProcessNames[pid] = name;
+      return name;
+    }
+
+    // Whether any of nine points spread over the window shows the window itself.
+    static bool Peeks(IntPtr hwnd, Rectangle rect) {
+      for (var i = 1; i <= 3; i++)
+        for (var j = 1; j <= 3; j++)
+          if (Shows(hwnd, rect.X + rect.Width * i / 4, rect.Y + rect.Height * j / 4)) return true;
+      return false;
+    }
+
+    // Whether the window itself is what shows at that spot. Another window of the same app on top counts as covering
+    // it: a mouse click there would land in that other window.
+    static bool Shows(IntPtr hwnd, int x, int y) {
+      return GetAncestor(WindowFromPoint(new POINT { X = x, Y = y }), 2) == hwnd;
+    }
+
+    static CacheRequest MapCache() {
+      var cache = new CacheRequest();
+      foreach (var property in new AutomationProperty[] {
+        AutomationElement.NameProperty, AutomationElement.ControlTypeProperty, AutomationElement.BoundingRectangleProperty,
+        AutomationElement.IsEnabledProperty, AutomationElement.HasKeyboardFocusProperty, AutomationElement.RuntimeIdProperty,
+        AutomationElement.IsPasswordProperty, AutomationElement.NativeWindowHandleProperty, ValuePattern.ValueProperty,
+        TogglePattern.ToggleStateProperty,
+        SelectionItemPattern.IsSelectedProperty, ExpandCollapsePattern.ExpandCollapseStateProperty,
+        ScrollPattern.VerticallyScrollableProperty, ScrollPattern.VerticalScrollPercentProperty, RangeValuePattern.ValueProperty,
+      }) cache.Add(property);
+      cache.TreeScope = TreeScope.Subtree;
+      cache.TreeFilter = new AndCondition(Automation.ControlViewCondition, new PropertyCondition(AutomationElement.IsOffscreenProperty, false));
+      return cache;
+    }
+
+    // One cross-process call fetches the whole visible tree of a window; the walk then only reads the cache.
+    static void Collect(IntPtr hwnd, MapState state) {
+      AutomationElement root;
+      try { root = AutomationElement.FromHandle(hwnd).GetUpdatedCache(MapCache()); } catch { return; }
+      var title = TitleOf(hwnd);
+      var cls = ClassOf(hwnd);
+      var context = cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd" ? "taskbar" : "";
+      Walk(root, hwnd, title, context, "", "", null, WindowRect(hwnd), state, 0);
+    }
+
+    static readonly HashSet<string> Clipping = new HashSet<string> { "list", "tree", "datagrid", "table", "document", "tab" };
+    // Table rows, list rows and tree nodes name the group their buttons belong to ("Order 1003 > Edit").
+    static readonly HashSet<string> Rows = new HashSet<string> { "dataitem", "listitem", "treeitem" };
+    // A row or cell named after the one control inside it is that control; the control itself is listed instead.
+    static readonly HashSet<string> Specific = new HashSet<string> {
+      "button", "hyperlink", "checkbox", "radiobutton", "edit", "combobox", "menuitem", "splitbutton", "tabitem",
+    };
+
+    // clip is what the lists and scroll areas around a node leave visible: a row half scrolled out of a list is listed
+    // (and clicked) by the part that shows, never by a centre that lies outside the list.
+    // context is the innermost named group, outer the one around it: a cell named "Edit" around an "Edit" button
+    // must not hide the row "Order 1003" the button really belongs to.
+    static void Walk(AutomationElement node, IntPtr hwnd, string title, string context, string outer, string owner, Dictionary<string, object> ownerItem, Rectangle clip, MapState state, int depth) {
+      if (state.Stop || depth > 80) return;
+      AutomationElementCollection children;
+      try { children = node.CachedChildren; } catch { return; }
+      foreach (AutomationElement child in children) {
+        if (state.Stop) return;
+        if (Hidden(child)) continue;
+        string type, name;
+        System.Windows.Rect bounds;
+        try {
+          type = child.Cached.ControlType.ProgrammaticName.Replace("ControlType.", "").ToLowerInvariant();
+          name = Clean(child.Cached.Name);
+          bounds = child.Cached.BoundingRectangle;
+        } catch { continue; }
+        var full = bounds.IsEmpty ? Rectangle.Empty : new Rectangle((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height);
+        var rect = full.IsEmpty ? full : Rectangle.Intersect(full, clip);
+        var inner = context;
+        var innerOuter = outer;
+        var innerClip = clip;
+        var scrolls = Cached(child, ScrollPattern.VerticallyScrollableProperty);
+        if (!full.IsEmpty && (Clipping.Contains(type) || (scrolls is bool && (bool)scrolls))) innerClip = rect;
+        var innerOwner = owner;
+        var innerOwnerItem = ownerItem;
+        if ((Containers.Contains(type) || Rows.Contains(type)) && name.Length > 0 && name.Length <= 80 && name != title && !rect.IsEmpty) {
+          inner = name;
+          innerOuter = context;
+          if (Containers.Contains(type)) lock (state) state.Boxes.Add(new Box { Win = hwnd, Name = name, Rect = rect });
+        }
+        if (!rect.IsEmpty && rect.Width >= 3 && rect.Height >= Math.Min(6, full.Height)) {
+          var item = Describe(child, type, name, rect, hwnd, name == context && outer.Length > 0 ? outer : context, owner, state);
+          if (item != null) {
+            lock (state) {
+              if (state.Items.Count >= state.Limit) { state.Stop = true; return; }
+              if (ownerItem != null && name.Length > 0 && name == owner && Specific.Contains(type) && Rows.Contains(Str(ownerItem, "type")))
+                state.Items.Remove(ownerItem);
+              state.Items.Add(item);
+            }
+            if (Clickable.Contains(type)) { innerOwner = name; innerOwnerItem = item; }
+          }
+        }
+        Walk(child, hwnd, title, inner, innerOuter, innerOwner, innerOwnerItem, innerClip, state, depth + 1);
+      }
+    }
+
+    static Dictionary<string, object> Describe(AutomationElement element, string type, string name, Rectangle rect, IntPtr hwnd, string context, string owner, MapState state) {
+      int cx = rect.X + rect.Width / 2, cy = rect.Y + rect.Height / 2;
+      if (!state.Area.Contains(cx, cy)) return null;
+      var states = new List<string>();
+      if (!Shows(hwnd, cx, cy)) {
+        if (!state.Hidden) return null;
+        states.Add("covered");
+      }
+      var scroll = Cached(element, ScrollPattern.VerticallyScrollableProperty);
+      var scrollable = scroll is bool && (bool)scroll;
+      if (scrollable) {
+        var percent = Cached(element, ScrollPattern.VerticalScrollPercentProperty);
+        if (percent is double && (double)percent >= 0) states.Add("scroll " + Math.Round((double)percent) + "%");
+      }
+      var clickable = Clickable.Contains(type);
+      if (!clickable && !(Readable.Contains(type) && name.Length > 0) && !(scrollable && Containers.Contains(type))) return null;
+      // A button's own label is read as a text child; it is the button already.
+      if (type == "text" && name == owner) return null;
+      lock (state) if (!state.Seen.Add(type + "|" + name + "|" + cx / 6 + "|" + cy / 6)) return null;
+
+      var value = "";
+      var password = Cached(element, AutomationElement.IsPasswordProperty);
+      if (password is bool && (bool)password) states.Add("password");
+      else {
+        var raw = Cached(element, ValuePattern.ValueProperty);
+        if (raw is string) value = Clean((string)raw);
+        var range = Cached(element, RangeValuePattern.ValueProperty);
+        if (value.Length == 0 && range is double && type != "scrollbar") value = Math.Round((double)range, 2).ToString();
+        // Multi-line text boxes and documents often expose their text only through TextPattern.
+        if (value.Length == 0 && (type == "document" || type == "edit")) {
+          try {
+            object text;
+            if (element.TryGetCurrentPattern(TextPattern.Pattern, out text)) value = Clean(((TextPattern)text).DocumentRange.GetText(400));
+          } catch { }
+        }
+      }
+      var enabled = Cached(element, AutomationElement.IsEnabledProperty);
+      if (enabled is bool && !(bool)enabled) states.Add("disabled");
+      var focus = Cached(element, AutomationElement.HasKeyboardFocusProperty);
+      if (focus is bool && (bool)focus) states.Add("focused");
+      var toggle = Cached(element, TogglePattern.ToggleStateProperty);
+      if (toggle is ToggleState) states.Add((ToggleState)toggle == ToggleState.On ? "checked" : (ToggleState)toggle == ToggleState.Off ? "unchecked" : "mixed");
+      var selected = Cached(element, SelectionItemPattern.IsSelectedProperty);
+      if (selected is bool && (bool)selected) states.Add("selected");
+      var expand = Cached(element, ExpandCollapsePattern.ExpandCollapseStateProperty);
+      if (expand is ExpandCollapseState && (ExpandCollapseState)expand != ExpandCollapseState.LeafNode)
+        states.Add((ExpandCollapseState)expand == ExpandCollapseState.Expanded ? "expanded" : "collapsed");
+
+      var item = new Dictionary<string, object> {
+        { "src", "uia" }, { "type", type }, { "name", Cut(name) }, { "x", rect.X }, { "y", rect.Y }, { "w", rect.Width },
+        { "h", rect.Height }, { "win", hwnd.ToInt64() }, { "ctx", context }, { "mark", clickable }, { "state", states.ToArray() },
+      };
+      if (value.Length > 0 && value != name) item["value"] = Cut(value);
+      try {
+        var id = element.GetCachedPropertyValue(AutomationElement.RuntimeIdProperty) as int[];
+        if (id != null) item["rid"] = string.Join(".", id);
+      } catch { }
+      return item;
+    }
+
+    // A control whose own window is hidden (a label set invisible) can stay in the accessibility tree without being
+    // reported offscreen; it is not on screen, so it is left out, children and all.
+    static bool Hidden(AutomationElement element) {
+      var handle = Cached(element, AutomationElement.NativeWindowHandleProperty);
+      return handle is int && (int)handle != 0 && !IsWindowVisible(new IntPtr((int)handle));
+    }
+
+    static object Cached(AutomationElement element, AutomationProperty property) {
+      try {
+        var value = element.GetCachedPropertyValue(property, true);
+        return value == AutomationElement.NotSupported ? null : value;
+      } catch { return null; }
+    }
+
+    static string Clean(string text) {
+      if (string.IsNullOrEmpty(text)) return "";
+      var builder = new StringBuilder(Math.Min(text.Length, 400));
+      foreach (var ch in text.Length > 400 ? text.Substring(0, 400) : text) builder.Append(char.IsControl(ch) ? ' ' : ch);
+      return builder.ToString().Trim();
+    }
+
+    static string Cut(string text) { return text.Length > 120 ? text.Substring(0, 120) + "..." : text; }
+
+    // OCR text joins the map only where no control already covers it, so each thing on screen is listed once. A
+    // control owns its area outright; inside a content area or a group, text is dropped only when it reads like
+    // what the control or group already says (OCR misreads small UI text, so "iem I" counts as "Item 1"). Text
+    // belongs to the window drawn at its centre and to the innermost named group around it.
+    static List<Dictionary<string, object>> MergeText(List<Dictionary<string, object>> words, List<Dictionary<string, object>> items, List<Box> boxes, Rectangle area, string skip, HashSet<int> pids, IntPtr only) {
+      var result = new List<Dictionary<string, object>>();
+      var known = items.Select(i => new {
+        rect = new Rectangle(Int(i, "x"), Int(i, "y"), Int(i, "w"), Int(i, "h")),
+        text = Fold(Str(i, "name") + " " + (Str(i, "value") ?? "")), name = Fold(Str(i, "name")),
+        owns = !Containers.Contains(Str(i, "type")) && Str(i, "type") != "edit",
+      }).ToList();
+      var titles = new Dictionary<IntPtr, string>();
+      foreach (var word in words) {
+        var rect = new Rectangle(Int(word, "x"), Int(word, "y"), Int(word, "w"), Int(word, "h"));
+        int cx = rect.X + rect.Width / 2, cy = rect.Y + rect.Height / 2;
+        var folded = Fold(Str(word, "text"));
+        if (folded.Length == 0 || !area.Contains(cx, cy)) continue;
+        var top = GetAncestor(WindowFromPoint(new POINT { X = cx, Y = cy }), 2);
+        if (top == IntPtr.Zero || Own(top, skip, pids) || (only != IntPtr.Zero && !Shows(only, cx, cy))) continue;
+        var said = known.Any(k => (k.rect.Contains(cx, cy) || Overlap(k.rect, rect) > 0.5) &&
+          (k.owns || k.text.Contains(folded) || (k.name.Length >= 3 && folded.Contains(k.name)) || Like(folded, k.name)));
+        if (said) continue;
+        if (boxes.Any(b => b.Rect.Contains(cx, cy) && Like(folded, Fold(b.Name)))) continue;
+        if (!titles.ContainsKey(top)) titles[top] = Fold(TitleOf(top));
+        if (Like(folded, titles[top])) continue;
+        var box = boxes.Where(b => b.Win == top && b.Rect.Contains(cx, cy)).OrderBy(b => b.Rect.Width * b.Rect.Height).FirstOrDefault();
+        result.Add(new Dictionary<string, object> {
+          { "src", "ocr" }, { "type", "text" }, { "name", Cut(Str(word, "text")) }, { "x", rect.X }, { "y", rect.Y },
+          { "w", rect.Width }, { "h", rect.Height }, { "win", top.ToInt64() }, { "ctx", box == null ? "" : box.Name },
+          { "mark", true }, { "state", new string[0] },
+        });
+      }
+      return result;
+    }
+
+    // Whether two folded strings are the same text give or take OCR misreads: at most a third of the letters differ.
+    static bool Like(string a, string b) {
+      if (a.Length == 0 || b.Length == 0) return false;
+      if (Math.Abs(a.Length - b.Length) * 3 > Math.Max(a.Length, b.Length)) return false;
+      var previous = new int[b.Length + 1];
+      var current = new int[b.Length + 1];
+      for (var j = 0; j <= b.Length; j++) previous[j] = j;
+      for (var i = 1; i <= a.Length; i++) {
+        current[0] = i;
+        for (var j = 1; j <= b.Length; j++)
+          current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+        var swap = previous; previous = current; current = swap;
+      }
+      return previous[b.Length] * 3 <= Math.Max(a.Length, b.Length);
+    }
+
+    static double Overlap(Rectangle a, Rectangle b) {
+      var both = Rectangle.Intersect(a, b);
+      return both.IsEmpty || b.Width * b.Height == 0 ? 0 : both.Width * both.Height / (double)(b.Width * b.Height);
+    }
+
+    static List<Dictionary<string, object>> ReadSafe(Bitmap bitmap, Rectangle area, double scale, out string status) {
+      try {
+        var result = ReadText(bitmap, area, scale);
+        status = "ok";
+        return result;
+      } catch (Exception error) {
+        status = error.Message;
+        return null;
+      }
+    }
+
+    static Func<Bitmap, object> reader;
+
+    // The OCR engine lives in a separately compiled DLL that may be missing, so it is looked up by name.
+    static Func<Bitmap, object> Reader() {
+      if (reader != null) return reader;
+      foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) {
+        var type = assembly.GetType("OpencodeComputer.TextReader", false);
+        if (type == null) continue;
+        reader = (Func<Bitmap, object>)Delegate.CreateDelegate(typeof(Func<Bitmap, object>), type.GetMethod("Read"));
+        return reader;
+      }
+      throw new Exception("unavailable");
+    }
+
+    // OCR as phrases with screen rectangles. The engine's lines can run across a whole toolbar, so a line is cut
+    // wherever the gap between two words is wider than the text is tall: "File  Edit  View" becomes three items.
+    static List<Dictionary<string, object>> ReadText(Bitmap bitmap, Rectangle area, double scale) {
+      var read = Reader();
+      // Very large displays are read at a lower scale; their text is large in pixels anyway and it keeps OCR quick.
+      scale = Math.Min(scale, 2600.0 / Math.Max(bitmap.Width, bitmap.Height));
+      object lines;
+      if (Math.Abs(scale - 1) > 0.01) {
+        using (var sized = new Bitmap(Math.Max(1, (int)(bitmap.Width * scale)), Math.Max(1, (int)(bitmap.Height * scale)), PixelFormat.Format32bppArgb)) {
+          using (var g = Graphics.FromImage(sized)) {
+            g.InterpolationMode = scale > 1 ? InterpolationMode.HighQualityBicubic : InterpolationMode.Bilinear;
+            g.DrawImage(bitmap, 0, 0, sized.Width, sized.Height);
+          }
+          lines = read(sized);
+        }
+      } else lines = read(bitmap);
+      var result = new List<Dictionary<string, object>>();
+      foreach (Dictionary<string, object> line in (object[])lines) {
+        var phrase = new List<Dictionary<string, object>>();
+        foreach (Dictionary<string, object> word in (object[])line["words"]) {
+          if (phrase.Count > 0) {
+            var last = phrase[phrase.Count - 1];
+            var gap = Num(word, "x") - (Num(last, "x") + Num(last, "w"));
+            if (gap > 1.2 * Math.Max(Num(word, "h"), Num(last, "h"))) { result.Add(Phrase(phrase, area, scale)); phrase.Clear(); }
+          }
+          phrase.Add(word);
+        }
+        if (phrase.Count > 0) result.Add(Phrase(phrase, area, scale));
+      }
+      return result;
+    }
+
+    static Dictionary<string, object> Phrase(List<Dictionary<string, object>> words, Rectangle area, double scale) {
+      double x0 = words.Min(w => Num(w, "x")), y0 = words.Min(w => Num(w, "y"));
+      double x1 = words.Max(w => Num(w, "x") + Num(w, "w")), y1 = words.Max(w => Num(w, "y") + Num(w, "h"));
+      return new Dictionary<string, object> {
+        { "text", string.Join(" ", words.Select(w => (string)w["text"])) },
+        { "x", (int)Math.Round(area.X + x0 / scale) }, { "y", (int)Math.Round(area.Y + y0 / scale) },
+        { "w", (int)Math.Ceiling((x1 - x0) / scale) }, { "h", (int)Math.Ceiling((y1 - y0) / scale) },
+      };
+    }
+
+    static double Num(Dictionary<string, object> r, string key) { return Convert.ToDouble(r[key]); }
+
+    // Lowercase letters and digits only, with glyphs OCR confuses merged, so "Log in", "LOGIN" and "Log1n" match.
+    // The tool folds the same way.
+    static string Fold(string text) {
+      var result = new StringBuilder();
+      foreach (var raw in (text ?? "").ToLowerInvariant()) {
+        var ch = raw == '0' ? 'o' : raw == '1' || raw == 'i' || raw == '|' || raw == '!' ? 'l' : raw;
+        if (char.IsLetterOrDigit(ch)) result.Append(ch);
+      }
+      return result.ToString();
+    }
+
+    // Waits until the area stops changing (pages loading, menus animating), so the frame shows where things
+    // ended up. A blinking caret or a small spinner does not count as change.
+    static void Settle(Rectangle area, int ms) {
+      if (ms <= 0) return;
+      var clock = Stopwatch.StartNew();
+      var previous = Sample(area);
+      while (clock.ElapsedMilliseconds < ms) {
+        Thread.Sleep(50);
+        var next = Sample(area);
+        var changed = 0;
+        for (var i = 0; i < next.Length; i++) if (next[i] != previous[i]) changed++;
+        if (changed <= next.Length / 500) return;
+        previous = next;
+      }
+    }
+
+    static int[] Sample(Rectangle area) {
+      using (var bitmap = Grab(area)) {
+        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try {
+          var result = new List<int>();
+          for (var y = 0; y < bitmap.Height; y += 8)
+            for (var x = 0; x < bitmap.Width; x += 8) result.Add(Marshal.ReadInt32(data.Scan0, y * data.Stride + x * 4));
+          return result.ToArray();
+        } finally { bitmap.UnlockBits(data); }
+      }
+    }
+
+    static Bitmap Grab(Rectangle area) {
+      var bitmap = new Bitmap(Math.Max(1, area.Width), Math.Max(1, area.Height), PixelFormat.Format32bppArgb);
+      using (var g = Graphics.FromImage(bitmap)) g.CopyFromScreen(area.X, area.Y, 0, 0, area.Size, CopyPixelOperation.SourceCopy);
+      return bitmap;
+    }
+
+    // Where an element is right now, looked up by its accessibility id (or by name near where it was) for
+    // controls, and by reading the text again around its last position for OCR text. Acting on a ref therefore
+    // never clicks where something used to be.
+    static object Resolve(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      var name = Str(r, "name") ?? "";
+      var old = new Rectangle(Int(r, "x"), Int(r, "y"), Int(r, "w"), Int(r, "h"));
+      int ox = old.X + old.Width / 2, oy = old.Y + old.Height / 2;
+      if (Str(r, "src") == "ocr") {
+        var wanted = Fold(name);
+        var around = Rectangle.Intersect(Rectangle.Inflate(old, old.Width / 2 + 40, old.Height * 2 + 10), SystemInformation.VirtualScreen);
+        var found = Nearest(around, 2, wanted, ox, oy);
+        if (found == null) {
+          var display = new Rectangle(Int(r, "dx"), Int(r, "dy"), Int(r, "dw"), Int(r, "dh"));
+          if (display.Width > 0) found = Nearest(display, 1, wanted, ox, oy);
+        }
+        if (found == null) return new Dictionary<string, object> { { "found", false } };
+        var rect = new Rectangle(Int(found, "x"), Int(found, "y"), Int(found, "w"), Int(found, "h"));
+        return Located(rect, IntPtr.Zero, true);
+      }
+      if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) return new Dictionary<string, object> { { "found", false }, { "closed", true } };
+      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, name, ox, oy);
+      if (element == null) return new Dictionary<string, object> { { "found", false } };
+      var shown = Visible(element);
+      object pattern;
+      if (Scant(shown, element) && element.TryGetCurrentPattern(ScrollItemPattern.Pattern, out pattern)) {
+        try { ((ScrollItemPattern)pattern).ScrollIntoView(); Thread.Sleep(80); shown = Visible(element); } catch { }
+      }
+      if (Scant(shown, element)) return new Dictionary<string, object> { { "found", false }, { "hidden", true } };
+      return Located(shown, hwnd, element.Current.IsEnabled);
+    }
+
+    // The part of an element its lists and scroll areas leave visible.
+    static Rectangle Visible(AutomationElement element) {
+      var bounds = element.Current.BoundingRectangle;
+      if (bounds.IsEmpty) return Rectangle.Empty;
+      var rect = new Rectangle((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height);
+      var walker = TreeWalker.ControlViewWalker;
+      var node = walker.GetParent(element);
+      for (var depth = 0; node != null && depth < 12 && !rect.IsEmpty; depth++) {
+        var type = node.Current.ControlType;
+        object scroll;
+        if (type == ControlType.List || type == ControlType.Tree || type == ControlType.DataGrid || type == ControlType.Table ||
+            type == ControlType.Document || type == ControlType.Tab || type == ControlType.Window || node.TryGetCurrentPattern(ScrollPattern.Pattern, out scroll)) {
+          var outer = node.Current.BoundingRectangle;
+          if (!outer.IsEmpty) rect = Rectangle.Intersect(rect, new Rectangle((int)outer.X, (int)outer.Y, (int)outer.Width, (int)outer.Height));
+        }
+        if (type == ControlType.Window) break;
+        node = walker.GetParent(node);
+      }
+      return rect;
+    }
+
+    static bool Scant(Rectangle shown, AutomationElement element) {
+      if (shown.IsEmpty || shown.Width < 3) return true;
+      var full = element.Current.BoundingRectangle;
+      return shown.Height < Math.Min(6, Math.Max(1, (int)full.Height)) || element.Current.IsOffscreen;
+    }
+
+    static Dictionary<string, object> Located(Rectangle rect, IntPtr hwnd, bool enabled) {
+      int cx = rect.X + rect.Width / 2, cy = rect.Y + rect.Height / 2;
+      return new Dictionary<string, object> {
+        { "found", true }, { "x", rect.X }, { "y", rect.Y }, { "w", rect.Width }, { "h", rect.Height }, { "enabled", enabled },
+        { "covered", hwnd != IntPtr.Zero && !Shows(hwnd, cx, cy) }, { "top", Window(GetAncestor(WindowFromPoint(new POINT { X = cx, Y = cy }), 2)) },
+      };
+    }
+
+    static Dictionary<string, object> Nearest(Rectangle area, double scale, string wanted, int x, int y) {
+      if (area.Width < 2 || area.Height < 2 || wanted.Length == 0) return null;
+      List<Dictionary<string, object>> words;
+      using (var bitmap = Grab(area)) words = ReadText(bitmap, area, scale);
+      return words
+        .Where(w => { var f = Fold(Str(w, "text")); return f == wanted || (wanted.Length >= 3 && f.Contains(wanted)); })
+        .OrderBy(w => Fold(Str(w, "text")) == wanted ? 0 : 1)
+        .ThenBy(w => Math.Pow(Int(w, "x") + Int(w, "w") / 2 - x, 2) + Math.Pow(Int(w, "y") + Int(w, "h") / 2 - y, 2))
+        .FirstOrDefault();
+    }
+
+    static AutomationElement ByRid(IntPtr hwnd, string rid) {
+      if (hwnd == IntPtr.Zero || string.IsNullOrEmpty(rid) || !IsWindow(hwnd)) return null;
+      try {
+        var id = rid.Split('.').Select(int.Parse).ToArray();
+        return AutomationElement.FromHandle(hwnd).FindFirst(TreeScope.Subtree, new PropertyCondition(AutomationElement.RuntimeIdProperty, id));
+      } catch { return null; }
+    }
+
+    // What a pointer action at this spot lands on, named the way the map names it: the control itself rather
+    // than the label inside it, and the group around it.
+    static object Hit(int x, int y) {
+      var node = AutomationElement.FromPoint(new System.Windows.Point(x, y));
+      var chain = new List<AutomationElement>();
+      var walker = TreeWalker.ControlViewWalker;
+      while (node != null && chain.Count < 8) {
+        chain.Add(node);
+        if (node.Current.ControlType == ControlType.Window) break;
+        node = walker.GetParent(node);
+      }
+      Func<AutomationElement, string> kind = e => e.Current.ControlType.ProgrammaticName.Replace("ControlType.", "").ToLowerInvariant();
+      var at = chain.Take(4).ToList().FindIndex(e => Clickable.Contains(kind(e)));
+      if (at < 0) at = chain.FindIndex(e => Clean(e.Current.Name).Length > 0);
+      if (at < 0) return null;
+      var control = chain[at];
+      var context = chain.Skip(at + 1).Where(e => Containers.Contains(kind(e)) && Clean(e.Current.Name).Length > 0)
+        .Select(e => Clean(e.Current.Name)).FirstOrDefault() ?? "";
+      return new Dictionary<string, object> {
+        { "type", control.Current.ControlType.ProgrammaticName.Replace("ControlType.", "").ToLowerInvariant() },
+        { "name", Cut(Clean(control.Current.Name)) }, { "ctx", context },
+      };
+    }
+
+    // Fills a field, picks an option, sets a checkbox or a slider through accessibility in one step, without
+    // focus or typing, and reads the result back.
+    static object SetValue(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, Str(r, "name") ?? "", Int(r, "x"), Int(r, "y"));
+      if (element == null) throw new Exception("That element is no longer there; look again");
+      if (!element.Current.IsEnabled) throw new Exception("That element is disabled");
+      var value = Str(r, "value") ?? "";
+      object pattern;
+      if (element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) {
+        var on = new[] { "true", "1", "on", "yes", "checked" }.Contains(value.Trim().ToLowerInvariant());
+        var toggle = (TogglePattern)pattern;
+        // Browsers apply a toggle asynchronously; each toggle waits for the state to change before deciding again,
+        // or a second toggle would undo the first.
+        for (var i = 0; i < 3 && (toggle.Current.ToggleState == ToggleState.On) != on; i++) {
+          var before = toggle.Current.ToggleState;
+          toggle.Toggle();
+          var clock = Stopwatch.StartNew();
+          while (toggle.Current.ToggleState == before && clock.ElapsedMilliseconds < 800) Thread.Sleep(20);
+        }
+        return toggle.Current.ToggleState == ToggleState.On ? "checked" : "unchecked";
+      }
+      var kind = element.Current.ControlType;
+      if (kind == ControlType.Slider || kind == ControlType.Spinner ||
+          (element.TryGetCurrentPattern(RangeValuePattern.Pattern, out pattern) && !element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)))
+        return Nudge(element, hwnd, value);
+      if (element.Current.ControlType == ControlType.ComboBox || element.Current.ControlType == ControlType.List) {
+        var picked = Choose(element, value);
+        if (picked != null) return picked;
+      }
+      if (element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern) && !((ValuePattern)pattern).Current.IsReadOnly) {
+        ((ValuePattern)pattern).SetValue(value);
+        if (element.Current.IsPassword) return "(set)";
+        return ((ValuePattern)pattern).Current.Value;
+      }
+      throw new Exception("This element cannot be set directly; click it and type instead");
+    }
+
+    // Puts the keyboard focus in a field through accessibility, so typing can follow without a mouse click.
+    static object Focus(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, Str(r, "name") ?? "", Int(r, "x"), Int(r, "y"));
+      if (element == null) throw new Exception("That element is no longer there; look again");
+      if (!element.Current.IsEnabled) throw new Exception("That element is disabled");
+      Front(hwnd);
+      element.SetFocus();
+      return element.Current.HasKeyboardFocus;
+    }
+
+    // Setting a range directly (TBM_SETPOS and the like) often skips the app's own change events, so sliders and
+    // spinners are moved with the arrow keys the way a person would, checking the value read back after each batch
+    // and turning round if the keys move it the other way. One that cannot be read is typed into instead.
+    static string Nudge(AutomationElement element, IntPtr hwnd, string value) {
+      double wanted;
+      if (!double.TryParse(value.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out wanted))
+        throw new Exception("A slider or spinner needs a number");
+      Front(hwnd);
+      try { element.SetFocus(); } catch { }
+      Thread.Sleep(60);
+      var now = Number(element);
+      var spinner = element.Current.ControlType == ControlType.Spinner;
+      ushort up = spinner ? (ushort)0x26 : (ushort)0x27, down = spinner ? (ushort)0x28 : (ushort)0x25;
+      object pattern;
+      var step = element.TryGetCurrentPattern(RangeValuePattern.Pattern, out pattern) ? ((RangeValuePattern)pattern).Current.SmallChange : 1;
+      if (!(step > 0)) step = 1;
+      for (var round = 0; round < 12 && !double.IsNaN(now) && Math.Abs(wanted - now) > step / 2; round++) {
+        var gap = wanted - now;
+        var presses = Math.Max(1, Math.Min(200, (int)Math.Round(Math.Abs(gap) / step)));
+        var key = gap > 0 ? up : down;
+        for (var i = 0; i < presses; i++) { Key(key, false); Key(key, true); }
+        Thread.Sleep(50);
+        var next = Number(element);
+        if (!double.IsNaN(next) && Math.Abs(wanted - next) >= Math.Abs(gap)) { var swap = up; up = down; down = swap; }
+        now = next;
+      }
+      if (double.IsNaN(now) || Math.Abs(wanted - now) > step / 2) {
+        Combo("ctrl+a");
+        Type(value.Trim());
+        Combo("tab");
+        Thread.Sleep(80);
+        now = Number(element);
+      }
+      return double.IsNaN(now) ? value.Trim() : now.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    static double Number(AutomationElement element) {
+      object pattern;
+      double result;
+      if (element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern) &&
+          double.TryParse(((ValuePattern)pattern).Current.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out result))
+        return result;
+      if (element.TryGetCurrentPattern(RangeValuePattern.Pattern, out pattern)) return ((RangeValuePattern)pattern).Current.Value;
+      return double.NaN;
+    }
+
+    // Brings a window to the front so keys reach it. Windows only lets the app that last had input change the
+    // foreground; a tap of Alt counts as input.
+    static bool Front(IntPtr hwnd) {
+      if (hwnd == IntPtr.Zero) return false;
+      if (IsIconic(hwnd)) ShowWindow(hwnd, 9);
+      if (GetForegroundWindow() == hwnd) return true;
+      Key(0x12, false);
+      Key(0x12, true);
+      SetForegroundWindow(hwnd);
+      BringWindowToTop(hwnd);
+      Thread.Sleep(60);
+      return GetForegroundWindow() == hwnd;
+    }
+
+    // Selects the option whose name matches, opening a drop-down first if its options are not loaded yet.
+    static string Choose(AutomationElement element, string value) {
+      object pattern;
+      ExpandCollapsePattern expand = null;
+      if (element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern)) expand = (ExpandCollapsePattern)pattern;
+      Func<AutomationElement> find = () => {
+        var options = element.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.IsSelectionItemPatternAvailableProperty, true));
+        var wanted = Fold(value);
+        AutomationElement partial = null;
+        foreach (AutomationElement option in options) {
+          var name = Fold(option.Current.Name);
+          if (name == wanted) return option;
+          if (partial == null && wanted.Length > 0 && name.Contains(wanted)) partial = option;
+        }
+        return partial;
+      };
+      var found = find();
+      var opened = false;
+      if (found == null && expand != null) {
+        try { expand.Expand(); opened = true; Thread.Sleep(150); found = find(); } catch { }
+      }
+      if (found == null) { if (opened) try { expand.Collapse(); } catch { } return null; }
+      ((SelectionItemPattern)found.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+      if (opened) try { expand.Collapse(); } catch { }
+      return "selected \"" + found.Current.Name + "\"";
+    }
+
+    // Polls window titles, the working app's controls and, failing those, OCR of the display until the text
+    // shows up (or goes away), many times a second.
+    static object WaitFor(Dictionary<string, object> r) {
+      var wanted = Fold(Str(r, "query"));
+      if (wanted.Length == 0) throw new Exception("wait_for needs text");
+      var gone = Bool(r, "gone");
+      var limit = Math.Min(Math.Max(Int(r, "timeout", 10000), 100), 60000);
+      var skip = (Str(r, "skip") ?? "").ToLowerInvariant();
+      var pids = Pids(r);
+      var display = new Rectangle(Int(r, "x"), Int(r, "y"), Int(r, "width"), Int(r, "height"));
+      var clock = Stopwatch.StartNew();
+      while (true) {
+        var via = Spot(wanted, Pick(r), display, skip, pids);
+        if ((via != null) != gone)
+          return new Dictionary<string, object> { { "met", true }, { "via", via ?? "" }, { "ms", (int)clock.ElapsedMilliseconds } };
+        if (clock.ElapsedMilliseconds >= limit) return new Dictionary<string, object> { { "met", false }, { "ms", (int)clock.ElapsedMilliseconds } };
+        Thread.Sleep(100);
+      }
+    }
+
+    // Window titles count wherever they are. Content counts only in the working app's own windows (its dialogs and
+    // popups too): their controls first, then OCR of the display limited to what that app draws, so another app that
+    // happens to show the same word never satisfies or blocks the wait. Without a working app, any app counts.
+    static string Spot(string wanted, IntPtr target, Rectangle display, string skip, HashSet<int> pids) {
+      uint app = 0;
+      if (target != IntPtr.Zero) GetWindowThreadProcessId(target, out app);
+      string title = null;
+      var windows = new List<IntPtr>();
+      EnumWindows((hwnd, data) => {
+        if (!Shown(hwnd, skip, pids)) return true;
+        var text = TitleOf(hwnd);
+        if (title == null && Fold(text).Contains(wanted)) title = text;
+        uint pid;
+        GetWindowThreadProcessId(hwnd, out pid);
+        if (app != 0 && pid == app && windows.Count < 6) windows.Add(hwnd);
+        return true;
+      }, IntPtr.Zero);
+      if (title != null) return "window \"" + title + "\"";
+      if (target != IntPtr.Zero && !windows.Contains(target) && IsWindow(target)) windows.Insert(0, target);
+      foreach (var hwnd in windows) {
+        var window = hwnd;
+        var named = OnWorker(() => {
+          var cache = new CacheRequest();
+          cache.Add(AutomationElement.NameProperty);
+          cache.Add(AutomationElement.NativeWindowHandleProperty);
+          cache.Add(ValuePattern.ValueProperty);
+          cache.TreeScope = TreeScope.Subtree;
+          cache.TreeFilter = new AndCondition(Automation.ControlViewCondition, new PropertyCondition(AutomationElement.IsOffscreenProperty, false));
+          cache.AutomationElementMode = AutomationElementMode.None;
+          return Search(AutomationElement.FromHandle(window).GetUpdatedCache(cache), wanted, 0);
+        }, 1500, null) as string;
+        if (named != null) return "\"" + named + "\"";
+      }
+      if (display.Width < 2) return null;
+      try {
+        List<Dictionary<string, object>> words;
+        using (var bitmap = Grab(display)) words = ReadText(bitmap, display, 1);
+        foreach (var hit in words.Where(w => Fold(Str(w, "text")).Contains(wanted))) {
+          var top = GetAncestor(WindowFromPoint(new POINT { X = Int(hit, "x") + Int(hit, "w") / 2, Y = Int(hit, "y") + Int(hit, "h") / 2 }), 2);
+          if (top == IntPtr.Zero || Own(top, skip, pids)) continue;
+          uint pid;
+          GetWindowThreadProcessId(top, out pid);
+          if (app == 0 || pid == app) return "ocr \"" + Str(hit, "text") + "\"";
+        }
+      } catch { }
+      return null;
+    }
+
+    static string Search(AutomationElement node, string wanted, int depth) {
+      if (depth > 80) return null;
+      foreach (AutomationElement child in node.CachedChildren) {
+        if (Hidden(child)) continue;
+        var name = Clean(child.Cached.Name);
+        if (Fold(name).Contains(wanted)) return name;
+        var value = Cached(child, ValuePattern.ValueProperty) as string;
+        if (value != null && Fold(value).Contains(wanted)) return Cut(Clean(value));
+        var found = Search(child, wanted, depth + 1);
+        if (found != null) return found;
+      }
+      return null;
+    }
+
+    // Brings the best-matching app window to the front: an exact process name first, then a title match.
+    static object Switch(string query, string skip, HashSet<int> pids) {
+      var wanted = Fold(query);
+      if (wanted.Length == 0) throw new Exception("switch_window needs a window title or app name in text");
+      skip = (skip ?? "").ToLowerInvariant();
+      Func<IntPtr, int> rank = hwnd => {
+        uint pid;
+        GetWindowThreadProcessId(hwnd, out pid);
+        var process = Fold(ProcessName(pid));
+        var title = Fold(TitleOf(hwnd));
+        if (process == wanted) return 0;
+        if (title == wanted) return 1;
+        if (title.StartsWith(wanted)) return 2;
+        if (title.Contains(wanted)) return 3;
+        if (process.Contains(wanted)) return 4;
+        return 9;
+      };
+      // A window that is still opening (just launched, or animating in) is waited for briefly.
+      var best = IntPtr.Zero;
+      var clock = Stopwatch.StartNew();
+      while (true) {
+        var candidates = new List<IntPtr>();
+        EnumWindows((hwnd, data) => {
+          if (IsWindowVisible(hwnd) && GetWindowText(hwnd, new StringBuilder(2), 2) > 0 && (GetWindowLong(hwnd, -20) & 0x80) == 0 && !Own(hwnd, skip, pids)) {
+            int cloaked;
+            if (!(DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0)) candidates.Add(hwnd);
+          }
+          return true;
+        }, IntPtr.Zero);
+        best = candidates.Where(h => rank(h) < 9).OrderBy(rank).FirstOrDefault();
+        if (best != IntPtr.Zero || clock.ElapsedMilliseconds > 2000) break;
+        Thread.Sleep(100);
+      }
+      if (best == IntPtr.Zero) throw new Exception("No open window matches \"" + query + "\"");
+      var front = Front(best);
+      var info = (Dictionary<string, object>)Window(best);
+      info["front"] = front;
+      return info;
+    }
+
+    static Rectangle WindowRect(IntPtr hwnd) {
+      RECT rect;
+      if (!GetWindowRect(hwnd, out rect)) return Rectangle.Empty;
+      return new Rectangle(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+    }
+
+    static string TitleOf(IntPtr hwnd) {
+      var title = new StringBuilder(512);
+      GetWindowText(hwnd, title, title.Capacity);
+      return title.ToString();
+    }
+
+    static string ClassOf(IntPtr hwnd) {
+      var name = new StringBuilder(64);
+      GetClassName(hwnd, name, name.Capacity);
+      return name.ToString();
+    }
+
+    static object Rect(Rectangle rect) {
+      return new Dictionary<string, object> { { "x", rect.X }, { "y", rect.Y }, { "w", rect.Width }, { "h", rect.Height } };
+    }
+
+    static Thread Start(ThreadStart work) {
+      var thread = new Thread(work) { IsBackground = true };
+      thread.SetApartmentState(ApartmentState.MTA);
+      thread.Start();
+      return thread;
+    }
+
+    // Runs accessibility calls on a worker so a hung app can never stall the helper. With no message, a timeout
+    // returns null instead of failing.
+    static object OnWorker(Func<object> work, int timeout, string message) {
+      object result = null;
+      Exception failure = null;
+      var worker = Start(() => { try { result = work(); } catch (Exception error) { failure = error; } });
+      if (!worker.Join(timeout)) {
+        if (message == null) return null;
+        throw new Exception(message);
+      }
+      if (failure != null) throw failure;
+      return result;
+    }
+
+    static IntPtr Hwnd(Dictionary<string, object> r, string key) {
+      object value;
+      return new IntPtr(r.TryGetValue(key, out value) && value != null ? Convert.ToInt64(value) : 0);
+    }
+
+    static bool Bool(Dictionary<string, object> r, string key) {
+      object value;
+      return r.TryGetValue(key, out value) && value is bool && (bool)value;
+    }
+
+    static HashSet<int> Pids(Dictionary<string, object> r) {
+      return new HashSet<int>((Str(r, "pids") ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(int.Parse));
+    }
+  }
+}

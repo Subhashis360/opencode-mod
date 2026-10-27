@@ -1,0 +1,21 @@
+Creates and manages scheduled tasks: prompts that OpenCode runs on its own at set times, each in a new session in the task's project folder. Tasks run while OpenCode is running (the desktop app keeps running in the tray when its window is closed).
+
+Use it when the user asks for something to happen later or repeatedly ("every morning at 9", "each Monday", "on the 1st of every month", "every 30 minutes", "tomorrow at 6pm").
+
+Actions:
+- list: all tasks with id, schedule, next and last run
+- create: name, prompt, kind and its fields; directory defaults to the current project
+- update: id plus any fields to change (set enabled false to pause, true to resume)
+- delete: id
+- run: id, starts it now without changing its schedule
+- runs: recent runs, for one task when id is given
+
+Schedule kinds:
+- once: at (local date-time, e.g. 2026-10-17T09:00)
+- interval: minutes
+- daily: time (24-hour HH:MM)
+- weekly: time and days, e.g. ["mon", "wed", "fri"]
+- monthly: time and day (1-31; 31 means the last day in shorter months)
+- cron: cron (5 fields, local time)
+
+Write the prompt so it stands alone: the run starts a fresh session with no memory of this conversation. Runs are unattended, so permission controls what happens when a step needs approval: ask (default) waits for the user, deny skips the step, allow approves it. Only choose allow when the user asks for it.

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "opencode-mod",
+  "version": "2.2.0",
+  "description": "OpenCode extension (plugin) for OpenCode Desktop: computer use, scheduled tasks, hooks, auto memory, custom providers with model fetching, and speed settings",
+  "keywords": [
+    "opencode",
+    "opencode-extension",
+    "opencode-plugin",
+    "opencode-desktop",
+    "opencode-gui-plugin",
+    "computer-use",
+    "ai-agent",
+    "coding-agent",
+    "scheduled-tasks",
+    "llm"
+  ],
+  "homepage": "https://github.com/Subhashis360/opencode-mod#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Subhashis360/opencode-mod.git"
+  },
+  "bugs": "https://github.com/Subhashis360/opencode-mod/issues",
+  "author": "Subhashis360",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./dist/server.js",
+    "./server": "./dist/server.js",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run build:server && bun run build:gui",
+    "build:server": "bun build src/server/index.ts --target=bun --format=esm --outfile=dist/server.js --external=effect --external=@opencode/plugin \"--external=@opencode/plugin/*\"",
+    "build:gui": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jsonc-parser": "3.3.1"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "^2.2.0"
+  },
+  "devDependencies": {
+    "@opencode/ai": "2.2.0",
+    "@opencode/client": "2.2.0",
+    "@opencode/plugin": "2.2.0",
+    "@opencode/schema": "2.2.0",
+    "@tanstack/solid-query": "5.91.4",
+    "@types/bun": "1.4.3",
+    "effect": "4.0.1",
+    "electron": "44.9.1",
+    "solid-js": "1.9.15",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vite-plugin-solid": "2.11.10"
+  }
+}

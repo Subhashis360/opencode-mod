@@ -1,0 +1,44 @@
+$ErrorActionPreference = 'Stop'
+# The helper's C# sits next to this script, in a folder whose name carries a hash of the sources. It is compiled
+# once with the framework's own compiler into DLLs cached in that folder, so later starts only load them instead of
+# compiling again. OCR needs WinRT metadata that Add-Type cannot reference, and is optional: if it fails to build,
+# everything else still works.
+$dir = Split-Path -Parent $PSCommandPath
+$runtime = [Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
+$csc = Join-Path $runtime 'csc.exe'
+$wpf = Join-Path $runtime 'WPF'
+$meta = Join-Path $env:windir 'System32\WinMetadata'
+
+function Build([string]$out, [string[]]$sources, [string[]]$references) {
+  $ErrorActionPreference = 'Continue'
+  if (Test-Path $out) { return $true }
+  if (-not (Test-Path $csc)) { return $false }
+  $tmp = "$out.$([Guid]::NewGuid().ToString('n')).tmp"
+  try {
+    $arguments = @('/nologo', '/target:library', '/optimize+', "/out:$tmp") + ($references | ForEach-Object { "/r:$_" }) + $sources
+    $null = & $csc $arguments 2>&1
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tmp)) { return $false }
+    try { Move-Item -LiteralPath $tmp -Destination $out -ErrorAction Stop } catch { }
+    return (Test-Path $out)
+  } finally {
+    Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
+  }
+}
+
+$hostSources = @((Join-Path $dir 'host.cs'), (Join-Path $dir 'see.cs'), (Join-Path $dir 'aurora.cs'))
+$hostReferences = @('System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll',
+  (Join-Path $wpf 'UIAutomationClient.dll'), (Join-Path $wpf 'UIAutomationTypes.dll'), (Join-Path $wpf 'WindowsBase.dll'))
+$hostDll = Join-Path $dir 'host.dll'
+$built = $false
+try { $built = Build $hostDll $hostSources $hostReferences } catch { }
+if ($built) { $null = [Reflection.Assembly]::LoadFrom($hostDll) }
+else { Add-Type -Path $hostSources -ReferencedAssemblies System.Drawing, System.Windows.Forms, System.Web.Extensions, UIAutomationClient, UIAutomationTypes, WindowsBase }
+
+try {
+  $ocrReferences = @('System.Drawing.dll', (Join-Path $runtime 'System.Runtime.dll'), (Join-Path $runtime 'System.Runtime.WindowsRuntime.dll')) +
+    (@('Foundation', 'Graphics', 'Media', 'Storage', 'Security', 'Globalization') | ForEach-Object { Join-Path $meta "Windows.$_.winmd" })
+  $ocrDll = Join-Path $dir 'ocr.dll'
+  if (Build $ocrDll @(Join-Path $dir 'ocr.cs') $ocrReferences) { $null = [Reflection.Assembly]::LoadFrom($ocrDll) }
+} catch { }
+
+[OpencodeComputer.Host]::Run()
