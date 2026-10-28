@@ -307,6 +307,9 @@ export default function ScheduleTab() {
                         </Button>
                       }
                     >
+                      <Button variant="ghost" onClick={() => setConfirming(undefined)}>
+                        {ctx.t("cancel")}
+                      </Button>
                       <Button
                         variant="danger"
                         onClick={() => void act(() => schedule.remove(task.id)).finally(() => setConfirming(undefined))}

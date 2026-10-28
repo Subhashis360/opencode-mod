@@ -6575,7 +6575,7 @@ var Definition = Rpc.define({
 // src/server/settings.ts
 import { mkdir as mkdir8, readFile as readFile9, rename as rename5, writeFile as writeFile8 } from "fs/promises";
 import path11 from "path";
-var DEFAULTS = { computerUse: false, stayInTray: true, openAtLogin: false };
+var DEFAULTS = { computerUse: false, stayInTray: true, openAtLogin: false, autoUpdate: true };
 var file6 = () => path11.join(Path.config, "opencode-mod.json");
 async function load3(target = file6()) {
   const parsed = await readFile9(target, "utf8").then((text) => JSON.parse(text)).catch(() => {
@@ -6587,7 +6587,8 @@ async function load3(target = file6()) {
   return {
     computerUse: value.computerUse === true,
     stayInTray: value.stayInTray !== false,
-    openAtLogin: value.openAtLogin === true
+    openAtLogin: value.openAtLogin === true,
+    autoUpdate: value.autoUpdate !== false
   };
 }
 async function save4(input, target = file6()) {

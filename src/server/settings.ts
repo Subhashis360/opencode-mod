@@ -13,9 +13,11 @@ export type Settings = {
   readonly stayInTray: boolean
   /** The desktop app starts in the tray when the user signs in. */
   readonly openAtLogin: boolean
+  /** OpenCode Mod checks GitHub when the app starts and installs an update in the background. On until turned off. */
+  readonly autoUpdate: boolean
 }
 
-export const DEFAULTS: Settings = { computerUse: false, stayInTray: true, openAtLogin: false }
+export const DEFAULTS: Settings = { computerUse: false, stayInTray: true, openAtLogin: false, autoUpdate: true }
 
 export const file = () => path.join(Path.config, "opencode-mod.json")
 
@@ -29,6 +31,7 @@ export async function load(target = file()): Promise<Settings> {
     computerUse: value.computerUse === true,
     stayInTray: value.stayInTray !== false,
     openAtLogin: value.openAtLogin === true,
+    autoUpdate: value.autoUpdate !== false,
   }
 }
 

@@ -93,11 +93,13 @@ export const css = `
   box-shadow: var(--v2-elevation-button-neutral, 0 1px 2px rgba(0, 0, 0, 0.25));
 }
 
-/* The open tab fades in, so switching feels smooth rather than jumping. */
-[data-ocm] .ocm-panel { display: flex; flex-direction: column; gap: 12px; animation: ocm-in 140ms ease-out; }
+/* The open tab shows at once: a fade from transparent painted the dark background for a frame on the heavier tabs. */
+[data-ocm] .ocm-panel { display: flex; flex-direction: column; gap: 12px; }
 [data-ocm] .ocm-panel-title { font-size: 15px; font-weight: 560; color: var(--v2-text-text-base); margin: 0; }
-@keyframes ocm-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { [data-ocm] .ocm-panel { animation: none; } [data-ocm] .ocm-nav-item { transition: none; } }
+@media (prefers-reduced-motion: reduce) { [data-ocm] .ocm-nav-item { transition: none; } }
+
+/* An entry's editor, opened in place below its row. */
+[data-ocm] .ocm-inline-editor { padding: 4px 0 12px; }
 
 /* Settings rows: the copy and the control share the line while they fit, then the control moves below. */
 [data-ocm] [data-component="settings-row"] { flex-wrap: wrap; row-gap: 10px; }

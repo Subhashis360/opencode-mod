@@ -87,6 +87,12 @@ const setup: Plugin.Setup<typeof definition> = (ctx) => {
           description: ctx.t("providers.description"),
           keywords: "provider custom openai compatible base url api key models fetch",
         },
+        {
+          id: "mod-updates",
+          title: ctx.t("tab.updates"),
+          description: ctx.t("update.description"),
+          keywords: "update updates auto automatic version github upgrade install restart",
+        },
       ]
     },
     render: (input) => (

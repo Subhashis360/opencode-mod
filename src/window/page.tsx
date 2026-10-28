@@ -2,7 +2,7 @@ import { createEffect, createSignal, For, Match, on, Show, Switch, type JSX } fr
 import AgentsTab from "./agents"
 import CommandsTab from "./commands"
 import ComputerTab from "./computer"
-import { useModConfig, type ModConfig } from "./data"
+import { useModConfig, useModPrompts, type ModConfig } from "./data"
 import ExperimentalTab from "./experimental"
 import HooksTab from "./hooks"
 import LimitsTab from "./limits"
@@ -15,6 +15,7 @@ import ProvidersTab from "./providers"
 import ScheduleTab from "./schedule"
 import { errorMessage } from "./shared"
 import { useExtension } from "./ui"
+import UpdatesTab from "./updates"
 
 // The Mod menu's tabs, in order. Each renders from the shared config query.
 const TABS = [
@@ -30,6 +31,7 @@ const TABS = [
   { id: "limits", render: () => <LimitsTab /> },
   { id: "computer", render: () => <ComputerTab /> },
   { id: "experimental", render: (config: ModConfig) => <ExperimentalTab config={config} /> },
+  { id: "updates", render: () => <UpdatesTab /> },
 ] as const satisfies readonly { id: string; render: (config: ModConfig) => JSX.Element }[]
 
 export type Tab = (typeof TABS)[number]["id"]
@@ -43,6 +45,7 @@ const GROUPS: readonly { id: string; tabs: readonly Tab[] }[] = [
   { id: "tools", tabs: ["mcp", "computer", "hooks", "permissions"] },
   { id: "models", tabs: ["providers", "limits"] },
   { id: "automation", tabs: ["schedule", "experimental"] },
+  { id: "extension", tabs: ["updates"] },
 ]
 
 // Search reveals an entry such as "mod-commands"; open its tab.
@@ -64,6 +67,8 @@ export function requestTab(tab: Tab) {
 export default function ModPage(props: { target?: string }) {
   const ctx = useExtension<typeof definition>()
   const config = useModConfig()
+  // Loaded with the page, so the System prompt tab opens with its text instead of filling in after a moment.
+  useModPrompts()
   const [tab, setTab] = createSignal<Tab>(requested() ?? tabFor(props.target))
   const errorText = () => errorMessage(config.query.error)
 

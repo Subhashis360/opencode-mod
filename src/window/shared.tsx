@@ -77,43 +77,75 @@ export function TabHeader<T>(props: {
   )
 }
 
-/** The saved entries of one config key, each with Edit and a Delete that asks once more. */
+/**
+ * The saved entries of one config key, each with Edit and a Delete that asks once more, with Cancel. With `editor`,
+ * the entry being edited (`editing`) opens its editor right below its row, and its Edit button closes it again.
+ */
 export function EntryList(props: {
   names: readonly string[]
   describe: (name: string) => string
   onEdit: (name: string) => void
   onDelete: (name: string) => Promise<unknown>
+  editing?: string
+  editor?: () => JSX.Element
+  onClose?: () => void
 }) {
   const ctx = useExtension<typeof definition>()
   const [confirming, setConfirming] = createSignal<string>()
+  const [deleting, setDeleting] = createSignal<string>()
+
+  const open = (name: string) => !!props.editor && props.editing === name
+
+  const remove = async (name: string) => {
+    setDeleting(name)
+    try {
+      await props.onDelete(name)
+    } finally {
+      setDeleting(undefined)
+      setConfirming(undefined)
+    }
+  }
 
   return (
     <div data-component="settings-list">
       <Show when={props.names.length} fallback={<Row title={ctx.t("empty")} />}>
         <For each={props.names}>
           {(name) => (
-            <Row title={name} description={props.describe(name)}>
-              <div class="flex items-center gap-2">
-                <Button variant="ghost" onClick={() => props.onEdit(name)}>
-                  {ctx.t("edit")}
-                </Button>
-                <Show
-                  when={confirming() === name}
-                  fallback={
-                    <Button variant="ghost" onClick={() => setConfirming(name)}>
-                      {ctx.t("delete")}
-                    </Button>
-                  }
-                >
-                  <Button
-                    variant="danger"
-                    onClick={() => void props.onDelete(name).finally(() => setConfirming(undefined))}
+            <>
+              <Row
+                title={name}
+                description={confirming() === name ? ctx.t("delete.ask", { name }) : props.describe(name)}
+              >
+                <div class="flex items-center gap-2">
+                  <Show
+                    when={confirming() === name}
+                    fallback={
+                      <>
+                        <Button
+                          variant={open(name) ? "neutral" : "ghost"}
+                          onClick={() => (open(name) && props.onClose ? props.onClose() : props.onEdit(name))}
+                        >
+                          {open(name) && props.onClose ? ctx.t("close") : ctx.t("edit")}
+                        </Button>
+                        <Button variant="ghost" onClick={() => setConfirming(name)}>
+                          {ctx.t("delete")}
+                        </Button>
+                      </>
+                    }
                   >
-                    {ctx.t("delete.confirm")}
-                  </Button>
-                </Show>
-              </div>
-            </Row>
+                    <Button variant="ghost" disabled={deleting() === name} onClick={() => setConfirming(undefined)}>
+                      {ctx.t("cancel")}
+                    </Button>
+                    <Button variant="danger" disabled={deleting() === name} onClick={() => void remove(name)}>
+                      {ctx.t("delete.confirm")}
+                    </Button>
+                  </Show>
+                </div>
+              </Row>
+              <Show when={open(name)}>
+                <div class="ocm-inline-editor">{props.editor?.()}</div>
+              </Show>
+            </>
           )}
         </For>
       </Show>

@@ -221,7 +221,9 @@ export default function ProvidersTab(props: { config: ModConfig }) {
   }
 
   const remove = async (name: string) => {
-    if (await save.run(["provider", name], undefined)) await saveDisabled([name])
+    if (!(await save.run(["provider", name], undefined))) return
+    if (open() && draft.original === name) setOpen(false)
+    await saveDisabled([name])
   }
 
   const describe = (name: string) => {
@@ -237,6 +239,129 @@ export default function ProvidersTab(props: { config: ModConfig }) {
       .join(" · ")
   }
 
+  // A new provider's editor opens at the top; a saved one's opens right below its row.
+  const editor = () => (
+    <EditorCard>
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <Field
+          label={ctx.t("providers.id")}
+          hint={ctx.t("providers.id.hint")}
+          error={showErrors() ? errors().id : undefined}
+        >
+          <TextInput value={draft.id} onInput={(event) => setDraft("id", event.currentTarget.value)} />
+        </Field>
+        <Field label={ctx.t("providers.name")}>
+          <TextInput value={draft.name} onInput={(event) => setDraft("name", event.currentTarget.value)} />
+        </Field>
+      </div>
+
+      <Field label={ctx.t("providers.baseURL")} error={showErrors() ? errors().baseURL : undefined}>
+        <TextInput
+          value={draft.baseURL}
+          placeholder="https://api.example.com/v1"
+          onInput={(event) => setDraft("baseURL", event.currentTarget.value)}
+        />
+      </Field>
+
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <Field label={ctx.t("providers.apiKey")} hint={ctx.t("providers.apiKey.hint")}>
+          <TextInput
+            type="password"
+            value={draft.apiKey}
+            onInput={(event) => setDraft("apiKey", event.currentTarget.value)}
+          />
+        </Field>
+        <Field label={ctx.t("providers.package")}>
+          <TextInput value={draft.npm} onInput={(event) => setDraft("npm", event.currentTarget.value)} />
+        </Field>
+      </div>
+
+      <Field label={ctx.t("providers.headers")} hint={ctx.t("mcp.pairs.placeholder")}>
+        <Textarea
+          rows={2}
+          value={draft.headers}
+          onInput={(event) => setDraft("headers", event.currentTarget.value)}
+        />
+      </Field>
+
+      <div class="flex flex-col gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-12-medium text-v2-text-text-base">
+            {ctx.t("providers.models", { selected: draft.selected.length })}
+          </span>
+          <Button variant="neutral" disabled={fetching()} onClick={() => void fetchModels()}>
+            {fetching() ? ctx.t("providers.fetching") : ctx.t("providers.fetch")}
+          </Button>
+        </div>
+        <Show when={fetchNote()}>
+          <p class="text-11-regular text-v2-text-text-muted">{fetchNote()}</p>
+        </Show>
+        <ErrorText message={fetchError()} />
+
+        <Show
+          when={draft.models.length}
+          fallback={<p class="text-12-regular text-v2-text-text-muted">{ctx.t("providers.models.empty")}</p>}
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <TextInput
+              class="min-w-48 flex-1"
+              value={filter()}
+              placeholder={ctx.t("providers.models.filter")}
+              onInput={(event) => setFilter(event.currentTarget.value)}
+            />
+            <Button
+              variant="ghost"
+              onClick={() => setDraft("selected", (list) => [...new Set([...list, ...shown().map((model) => model.id)])])}
+            >
+              {ctx.t("providers.models.all")}
+            </Button>
+            <Button variant="ghost" onClick={() => setDraft("selected", [])}>
+              {ctx.t("providers.models.none")}
+            </Button>
+          </div>
+          <div class="flex max-h-72 flex-col overflow-y-auto rounded-md border border-v2-border-border-base py-1">
+            <For each={shown()}>
+              {(model) => (
+                <label class="flex cursor-pointer items-center gap-2 px-3 py-1 text-12-regular text-v2-text-text-base">
+                  <input
+                    type="checkbox"
+                    checked={isSelected(model.id)}
+                    onChange={(event) => toggle(model.id, event.currentTarget.checked)}
+                  />
+                  <span class="truncate">{model.id}</span>
+                  <Show when={model.name}>
+                    <span class="truncate text-v2-text-text-muted">{model.name}</span>
+                  </Show>
+                </label>
+              )}
+            </For>
+          </div>
+        </Show>
+        <ErrorText message={showErrors() ? errors().models : undefined} />
+
+        <div class="flex items-center gap-2">
+          <TextInput
+            class="flex-1"
+            value={manual()}
+            placeholder={ctx.t("providers.models.add")}
+            onInput={(event) => setManual(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") addManual()
+            }}
+          />
+          <Button variant="ghost" onClick={addManual}>
+            {ctx.t("providers.models.add.button")}
+          </Button>
+        </div>
+      </div>
+
+      <Switch checked={draft.disabled} onChange={(checked) => setDraft("disabled", checked)}>
+        {ctx.t("disabled")}
+      </Switch>
+      <EditorActions config={props.config} error={save.error()} onSave={submit} onCancel={() => setOpen(false)} />
+    </EditorCard>
+  )
+
   return (
     <div class="flex flex-col gap-4">
       <TabHeader
@@ -247,133 +372,16 @@ export default function ProvidersTab(props: { config: ModConfig }) {
         onTemplate={(item) => edit({ ...empty(), id: item.id, name: item.title, baseURL: item.baseURL })}
       />
 
-      <Show when={open()}>
-        <EditorCard>
-          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <Field
-              label={ctx.t("providers.id")}
-              hint={ctx.t("providers.id.hint")}
-              error={showErrors() ? errors().id : undefined}
-            >
-              <TextInput value={draft.id} onInput={(event) => setDraft("id", event.currentTarget.value)} />
-            </Field>
-            <Field label={ctx.t("providers.name")}>
-              <TextInput value={draft.name} onInput={(event) => setDraft("name", event.currentTarget.value)} />
-            </Field>
-          </div>
-
-          <Field label={ctx.t("providers.baseURL")} error={showErrors() ? errors().baseURL : undefined}>
-            <TextInput
-              value={draft.baseURL}
-              placeholder="https://api.example.com/v1"
-              onInput={(event) => setDraft("baseURL", event.currentTarget.value)}
-            />
-          </Field>
-
-          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <Field label={ctx.t("providers.apiKey")} hint={ctx.t("providers.apiKey.hint")}>
-              <TextInput
-                type="password"
-                value={draft.apiKey}
-                onInput={(event) => setDraft("apiKey", event.currentTarget.value)}
-              />
-            </Field>
-            <Field label={ctx.t("providers.package")}>
-              <TextInput value={draft.npm} onInput={(event) => setDraft("npm", event.currentTarget.value)} />
-            </Field>
-          </div>
-
-          <Field label={ctx.t("providers.headers")} hint={ctx.t("mcp.pairs.placeholder")}>
-            <Textarea
-              rows={2}
-              value={draft.headers}
-              onInput={(event) => setDraft("headers", event.currentTarget.value)}
-            />
-          </Field>
-
-          <div class="flex flex-col gap-2">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <span class="text-12-medium text-v2-text-text-base">
-                {ctx.t("providers.models", { selected: draft.selected.length })}
-              </span>
-              <Button variant="neutral" disabled={fetching()} onClick={() => void fetchModels()}>
-                {fetching() ? ctx.t("providers.fetching") : ctx.t("providers.fetch")}
-              </Button>
-            </div>
-            <Show when={fetchNote()}>
-              <p class="text-11-regular text-v2-text-text-muted">{fetchNote()}</p>
-            </Show>
-            <ErrorText message={fetchError()} />
-
-            <Show
-              when={draft.models.length}
-              fallback={<p class="text-12-regular text-v2-text-text-muted">{ctx.t("providers.models.empty")}</p>}
-            >
-              <div class="flex flex-wrap items-center gap-2">
-                <TextInput
-                  class="min-w-48 flex-1"
-                  value={filter()}
-                  placeholder={ctx.t("providers.models.filter")}
-                  onInput={(event) => setFilter(event.currentTarget.value)}
-                />
-                <Button
-                  variant="ghost"
-                  onClick={() => setDraft("selected", (list) => [...new Set([...list, ...shown().map((model) => model.id)])])}
-                >
-                  {ctx.t("providers.models.all")}
-                </Button>
-                <Button variant="ghost" onClick={() => setDraft("selected", [])}>
-                  {ctx.t("providers.models.none")}
-                </Button>
-              </div>
-              <div class="flex max-h-72 flex-col overflow-y-auto rounded-md border border-v2-border-border-base py-1">
-                <For each={shown()}>
-                  {(model) => (
-                    <label class="flex cursor-pointer items-center gap-2 px-3 py-1 text-12-regular text-v2-text-text-base">
-                      <input
-                        type="checkbox"
-                        checked={isSelected(model.id)}
-                        onChange={(event) => toggle(model.id, event.currentTarget.checked)}
-                      />
-                      <span class="truncate">{model.id}</span>
-                      <Show when={model.name}>
-                        <span class="truncate text-v2-text-text-muted">{model.name}</span>
-                      </Show>
-                    </label>
-                  )}
-                </For>
-              </div>
-            </Show>
-            <ErrorText message={showErrors() ? errors().models : undefined} />
-
-            <div class="flex items-center gap-2">
-              <TextInput
-                class="flex-1"
-                value={manual()}
-                placeholder={ctx.t("providers.models.add")}
-                onInput={(event) => setManual(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") addManual()
-                }}
-              />
-              <Button variant="ghost" onClick={addManual}>
-                {ctx.t("providers.models.add.button")}
-              </Button>
-            </div>
-          </div>
-
-          <Switch checked={draft.disabled} onChange={(checked) => setDraft("disabled", checked)}>
-            {ctx.t("disabled")}
-          </Switch>
-          <EditorActions config={props.config} error={save.error()} onSave={submit} onCancel={() => setOpen(false)} />
-        </EditorCard>
-      </Show>
+      <Show when={open() && draft.original === undefined}>{editor()}</Show>
 
       <EntryList
         names={names()}
         describe={describe}
         onEdit={(name) => edit(fromConfig(name, providers()[name] ?? {}, disabledList()))}
         onDelete={remove}
+        editing={open() ? draft.original : undefined}
+        editor={editor}
+        onClose={() => setOpen(false)}
       />
     </div>
   )

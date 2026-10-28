@@ -4,6 +4,7 @@ import type { Plugin } from "@opencode/plugin/gui"
 import { app, BrowserWindow, Menu, Notification, Tray, type Event } from "electron"
 import { ScheduleRunner } from "./server/schedule/runner"
 import { ModSettings } from "./server/settings"
+import { setupUpdates } from "./update/main"
 
 /** Added to the sign-in launch, which starts in the tray only. */
 const HIDDEN = "--hidden"
@@ -160,6 +161,8 @@ const main: Plugin.MainSetup = (ctx) => {
   })
 
   ctx.onCleanup(() => runner.close())
+
+  setupUpdates(ctx)
 }
 
 export default main

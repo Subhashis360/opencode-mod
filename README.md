@@ -85,7 +85,7 @@ Use forward slashes on Windows too, and keep any plugins you already have. Resta
 
 ### Update and uninstall
 
-Run `git pull` in the folder to update; OpenCode reloads the extension by itself. To uninstall, remove the line from `plugins` and restart OpenCode. Your settings stay in your config and do nothing on their own.
+The extension updates itself: each time OpenCode starts it checks this repository and installs an update in the background, then asks for a restart. Turn that off, or check and update with one click, in Mod → Updates. `git pull` in the folder still works. To uninstall, remove the line from `plugins` and restart OpenCode. Your settings stay in your config and do nothing on their own.
 
 ## How it works
 
