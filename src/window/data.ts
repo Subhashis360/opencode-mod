@@ -65,6 +65,7 @@ type SettingsChange = {
   stayInTray?: boolean
   openAtLogin?: boolean
   aurora?: Mod.Settings["aurora"]
+  codeIndex?: Mod.CodeIndexSettings
 }
 
 /** The mod's own settings (computer use, the glow) and a way to change them. */
@@ -203,6 +204,28 @@ export function useModPrompts() {
     upstream,
     keep: (input: { id?: string; name: string; content: string }) => change(() => rpc()["prompts.keep"](input)),
     drop: (id: string) => change(() => rpc()["prompts.drop"]({ id })),
+  }
+}
+
+/** The code indexes the server holds, refreshed while the tab is open so progress shows. */
+export function useModCodeIndex() {
+  const { ctx, server, rpc } = useModServer()
+  const queryClient = useQueryClient()
+  const key = () => [ctx.id, "codeindex", server()?.url]
+
+  const status = useQuery(() => ({
+    queryKey: key(),
+    queryFn: () => rpc()["codeindex.status"]({}),
+    enabled: !!server(),
+    refetchInterval: 2_000,
+  }))
+
+  return {
+    status,
+    rebuild: async (root: string) => {
+      await rpc()["codeindex.rebuild"]({ root })
+      await queryClient.invalidateQueries({ queryKey: key() })
+    },
   }
 }
 

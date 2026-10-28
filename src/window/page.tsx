@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, Match, on, Show, Switch, type JSX } from "solid-js"
 import AgentsTab from "./agents"
+import CodeIndexTab from "./codeindex"
 import CommandsTab from "./commands"
 import ComputerTab from "./computer"
 import { useModConfig, useModPrompts, type ModConfig } from "./data"
@@ -16,6 +17,7 @@ import ScheduleTab from "./schedule"
 import { errorMessage } from "./shared"
 import { useExtension } from "./ui"
 import UpdatesTab from "./updates"
+import VoiceTab from "./voicetab"
 
 // The Mod menu's tabs, in order. Each renders from the shared config query.
 const TABS = [
@@ -30,6 +32,8 @@ const TABS = [
   { id: "prompts", render: (config: ModConfig) => <PromptsTab config={config} /> },
   { id: "limits", render: () => <LimitsTab /> },
   { id: "computer", render: () => <ComputerTab /> },
+  { id: "codeindex", render: () => <CodeIndexTab /> },
+  { id: "voice", render: () => <VoiceTab /> },
   { id: "experimental", render: (config: ModConfig) => <ExperimentalTab config={config} /> },
   { id: "updates", render: () => <UpdatesTab /> },
 ] as const satisfies readonly { id: string; render: (config: ModConfig) => JSX.Element }[]
@@ -42,7 +46,7 @@ export const TAB_IDS: readonly Tab[] = TABS.map((tab) => tab.id)
 // runs on, and what runs on its own.
 const GROUPS: readonly { id: string; tabs: readonly Tab[] }[] = [
   { id: "agent", tabs: ["agents", "prompts", "commands", "memory"] },
-  { id: "tools", tabs: ["mcp", "computer", "hooks", "permissions"] },
+  { id: "tools", tabs: ["mcp", "computer", "codeindex", "voice", "hooks", "permissions"] },
   { id: "models", tabs: ["providers", "limits"] },
   { id: "automation", tabs: ["schedule", "experimental"] },
   { id: "extension", tabs: ["updates"] },

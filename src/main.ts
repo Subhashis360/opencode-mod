@@ -5,6 +5,7 @@ import { app, BrowserWindow, Menu, Notification, Tray, type Event } from "electr
 import { ScheduleRunner } from "./server/schedule/runner"
 import { ModSettings } from "./server/settings"
 import { setupUpdates } from "./update/main"
+import { setupVoice } from "./voice/main"
 
 /** Added to the sign-in launch, which starts in the tray only. */
 const HIDDEN = "--hidden"
@@ -163,6 +164,7 @@ const main: Plugin.MainSetup = (ctx) => {
   ctx.onCleanup(() => runner.close())
 
   setupUpdates(ctx)
+  setupVoice(ctx)
 }
 
 export default main

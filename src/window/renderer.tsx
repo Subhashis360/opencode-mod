@@ -4,6 +4,7 @@ import type definition from "./index"
 import Page, { requestTab } from "./page"
 import { registerPending } from "./pending"
 import { css } from "./style"
+import { registerVoice } from "./voice"
 
 const setup: Plugin.Setup<typeof definition> = (ctx) => {
   // The bundle has its own copy of solid-query, so it brings its own client rather than the app's.
@@ -11,6 +12,7 @@ const setup: Plugin.Setup<typeof definition> = (ctx) => {
 
   ctx.add(Style, css)
   registerPending(ctx)
+  registerVoice(ctx)
 
   ctx.add(SettingsPage, {
     id: "mod",
@@ -86,6 +88,18 @@ const setup: Plugin.Setup<typeof definition> = (ctx) => {
           title: ctx.t("tab.providers"),
           description: ctx.t("providers.description"),
           keywords: "provider custom openai compatible base url api key models fetch",
+        },
+        {
+          id: "mod-codeindex",
+          title: ctx.t("tab.codeindex"),
+          description: ctx.t("codeindex.description"),
+          keywords: "code index search semantic symbols references call graph embeddings codebase",
+        },
+        {
+          id: "mod-voice",
+          title: ctx.t("tab.voice"),
+          description: ctx.t("voice.description"),
+          keywords: "voice speech microphone talk dictate whisper transcribe speak push to talk hands free",
         },
         {
           id: "mod-updates",

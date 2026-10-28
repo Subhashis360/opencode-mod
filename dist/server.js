@@ -1,7 +1,7 @@
 // @bun
 // src/server/index.ts
 import { Plugin } from "@opencode/plugin/effect";
-import { Effect as Effect6 } from "effect";
+import { Effect as Effect7 } from "effect";
 
 // src/server/computer/aurora.ts
 import { mkdir as mkdir3, readFile, rename, writeFile as writeFile2 } from "fs/promises";
@@ -3907,11 +3907,1507 @@ var register = Effect2.fn("ComputerPlugin.register")(function* (ctx, enabled) {
     });
   }).pipe(Effect2.orDie);
 });
+// src/server/codeindex/plugin.ts
+import { Effect as Effect3, Schema as Schema3 } from "effect";
+
+// src/server/codeindex/description.txt
+var description_default2 = `Searches this project's code index: a local index of every source file, its declarations (functions, classes, methods, types), its imports and its code chunks, kept current as files change. Use it before grep or glob to find where something is: it answers in one call with file:line references you can open with the read tool, instead of many searches and reads.
+
+Actions:
+- search: find code by what it does or by a name. query is plain language ("where are auth tokens refreshed", "retry with backoff") or an identifier. Returns the best matching code chunks with line numbers. Set full=true to see whole chunks.
+- symbols: find declarations by name, exact or partial (query "UserServ" finds UserService). Optional kind: function, method, class, interface, type, enum, struct, trait, module, variable, macro.
+- references: everything that uses one identifier (symbol): its definitions, calls, imports and other uses, each with the function or class it sits in. Use it for "who calls X" and before renaming or changing a signature.
+- outline: the declarations of one file (file), as a tree with line ranges. Cheaper than reading the whole file.
+- dependencies: what one file (file) imports and which project files import it.
+- status: how many files the index holds and whether it is updating.
+
+path narrows search, symbols and references to files whose path contains it (e.g. "src/server"). Paths are relative to the project folder. The index matches words and names, not exact text: use grep for an exact string or a regular expression.
+`;
+
+// src/server/codeindex/embeddings.ts
+import { readFile as readFile4 } from "fs/promises";
+import path6 from "path";
+var BATCH = 48;
+var MAX_CHARS = 2400;
+var MAX_PER_RUN = 50000;
+var jobs = new Map;
+var configKey = (config) => `${config.baseURL}|${config.model}`;
+async function embed(config, inputs) {
+  const response = await fetch(`${config.baseURL.replace(/\/+$/, "")}/embeddings`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}
+    },
+    body: JSON.stringify({ model: config.model, input: inputs }),
+    signal: AbortSignal.timeout(120000)
+  });
+  if (!response.ok)
+    throw new Error(`The embeddings endpoint answered ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  const json = await response.json();
+  const data = [...json.data ?? []].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  if (data.length !== inputs.length || data.some((item) => !Array.isArray(item.embedding)))
+    throw new Error("The embeddings endpoint returned an unexpected answer");
+  return data.map((item) => normalize(Float32Array.from(item.embedding)));
+}
+function normalize(vector) {
+  let sum = 0;
+  for (const value of vector)
+    sum += value * value;
+  const length = Math.sqrt(sum) || 1;
+  for (let index = 0;index < vector.length; index++)
+    vector[index] /= length;
+  return vector;
+}
+var toBlob = (vector) => new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength);
+var fromBlob = (blob) => new Float32Array(blob.slice().buffer);
+function fill(index, config) {
+  const key = configKey(config);
+  const current = jobs.get(index.root);
+  if (current?.running && current.config === key)
+    return;
+  const job = { running: true, done: 0, config: key };
+  jobs.set(index.root, job);
+  (async () => {
+    const db = index.store.db;
+    const missing = db.query("SELECT c.id, c.path, c.start, c.end, c.symbol, c.hash FROM chunks c LEFT JOIN vectors v ON v.hash = c.hash AND v.model = ? WHERE v.hash IS NULL LIMIT ?");
+    const insert = db.query("INSERT OR REPLACE INTO vectors(hash, model, vector) VALUES (?, ?, ?)");
+    try {
+      while (job.done < MAX_PER_RUN && jobs.get(index.root) === job) {
+        const batch = missing.all(config.model, BATCH);
+        if (!batch.length)
+          break;
+        const texts = [];
+        const cache = new Map;
+        for (const item of batch) {
+          let lines = cache.get(item.path);
+          if (!lines) {
+            lines = (await readFile4(path6.join(index.root, item.path), "utf8").catch(() => "")).split(/\r?\n/);
+            cache.set(item.path, lines);
+          }
+          const body = lines.slice(item.start - 1, item.end).join(`
+`);
+          texts.push(`${item.path}${item.symbol ? ` ${item.symbol}` : ""}
+${body}`.slice(0, MAX_CHARS));
+        }
+        const vectors = await embed(config, texts);
+        db.transaction(() => {
+          batch.forEach((item, position) => insert.run(item.hash, config.model, toBlob(vectors[position])));
+        })();
+        job.done += batch.length;
+      }
+    } catch (error) {
+      job.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      job.running = false;
+    }
+  })();
+}
+function stop2(root) {
+  jobs.delete(root);
+}
+function status(index, config) {
+  if (!config)
+    return;
+  const job = jobs.get(index.root);
+  const row = index.store.db.query("SELECT count(*) AS embedded FROM chunks c JOIN vectors v ON v.hash = c.hash AND v.model = ?").get(config.model);
+  return {
+    model: config.model,
+    embedded: row?.embedded ?? 0,
+    running: job?.running === true,
+    ...job?.error ? { error: job.error } : {}
+  };
+}
+async function nearest(index, config, query, limit) {
+  const [target] = await embed(config, [query]);
+  const rows = index.store.db.query("SELECT c.id AS id, v.vector AS vector FROM chunks c JOIN vectors v ON v.hash = c.hash AND v.model = ?").iterate(config.model);
+  const scored = [];
+  for (const row of rows) {
+    const vector = fromBlob(row.vector);
+    if (vector.length !== target.length)
+      continue;
+    let score = 0;
+    for (let position = 0;position < vector.length; position++)
+      score += vector[position] * target[position];
+    scored.push({ id: row.id, score });
+  }
+  return scored.sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+// src/server/codeindex/indexer.ts
+import { execFile } from "child_process";
+import { createHash as createHash3 } from "crypto";
+import { existsSync as existsSync2, watch } from "fs";
+import { readdir, readFile as readFile5, stat as stat2 } from "fs/promises";
+import path9 from "path";
+
+// src/server/codeindex/languages.ts
+var KEYWORDS = new Set([
+  "if",
+  "for",
+  "while",
+  "switch",
+  "catch",
+  "return",
+  "function",
+  "else",
+  "new",
+  "typeof",
+  "await",
+  "sizeof",
+  "do",
+  "try",
+  "with",
+  "case",
+  "throw",
+  "delete",
+  "void",
+  "in",
+  "of",
+  "elif",
+  "except",
+  "match",
+  "when",
+  "select",
+  "defer",
+  "go",
+  "lock",
+  "using",
+  "foreach",
+  "synchronized",
+  "constructor",
+  "super",
+  "this",
+  "self"
+]);
+var kindOf = (word) => ({
+  class: "class",
+  interface: "interface",
+  type: "type",
+  enum: "enum",
+  struct: "struct",
+  trait: "trait",
+  union: "struct",
+  protocol: "interface",
+  record: "class",
+  object: "class",
+  module: "module",
+  namespace: "module",
+  mod: "module",
+  impl: "trait",
+  extension: "class",
+  actor: "class"
+})[word] ?? "class";
+var SLASH = /^\s*(\/\/|\/\*|\*)/;
+var HASH = /^\s*#/;
+var DASH = /^\s*--/;
+var C_LIKE_TYPES = {
+  pattern: /^\s*(?:(?:public|private|protected|internal|static|abstract|final|sealed|partial|export|default|declare|open|data|inline|value|annotation|enum)\s+)*(class|interface|enum|struct|record|trait|object|union|namespace)\s+([A-Za-z_$][\w$]*)/,
+  kind: (match) => kindOf(match[1]),
+  name: 2
+};
+var LANGUAGES = {
+  typescript: {
+    id: "typescript",
+    comment: SLASH,
+    rules: [
+      { pattern: /^\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/, kind: "function" },
+      { pattern: /^\s*(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/, kind: "class" },
+      { pattern: /^\s*(?:export\s+)?(?:declare\s+)?interface\s+([A-Za-z_$][\w$]*)/, kind: "interface" },
+      { pattern: /^\s*(?:export\s+)?(?:declare\s+)?type\s+([A-Za-z_$][\w$]*)\s*(?:<[^=]*>)?\s*=/, kind: "type" },
+      { pattern: /^\s*(?:export\s+)?(?:declare\s+)?(?:const\s+)?enum\s+([A-Za-z_$][\w$]*)/, kind: "enum" },
+      { pattern: /^\s*(?:export\s+)?(?:declare\s+)?(?:namespace|module)\s+([A-Za-z_$][\w$.]*)\s*\{/, kind: "module" },
+      {
+        pattern: /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>|Effect\.fn)/,
+        kind: "function"
+      },
+      { pattern: /^\s*export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)/, kind: "variable" },
+      {
+        pattern: /^\s+(?:(?:public|private|protected|static|readonly|async|override|abstract|get|set)\s+)*\*?([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\([^()]*\)\s*(?::\s*[^={;()]+)?\{\s*$/,
+        kind: "method"
+      }
+    ],
+    imports: [
+      /^\s*import\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]/,
+      /^\s*export\s+(?:type\s+)?(?:\*|\{[^}]*\}|\*\s+as\s+\w+)\s+from\s+['"]([^'"]+)['"]/,
+      /\brequire\(\s*['"]([^'"]+)['"]\s*\)/,
+      /\bimport\(\s*['"]([^'"]+)['"]\s*\)/
+    ]
+  },
+  python: {
+    id: "python",
+    comment: HASH,
+    rules: [
+      { pattern: /^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)/, kind: "function", name: 2 },
+      { pattern: /^\s*class\s+([A-Za-z_]\w*)/, kind: "class" },
+      { pattern: /^([A-Z][A-Z0-9_]+)\s*(?::[^=]+)?=/, kind: "variable" }
+    ],
+    imports: [/^\s*from\s+([\w.]+)\s+import\b/, /^\s*import\s+([\w.]+)/]
+  },
+  go: {
+    id: "go",
+    comment: SLASH,
+    rules: [
+      { pattern: /^func\s+\([^)]*\)\s*([A-Za-z_]\w*)/, kind: "method" },
+      { pattern: /^func\s+([A-Za-z_]\w*)/, kind: "function" },
+      { pattern: /^type\s+([A-Za-z_]\w*)\s+(struct|interface)/, kind: (match) => match[2] === "interface" ? "interface" : "struct" },
+      { pattern: /^type\s+([A-Za-z_]\w*)\s/, kind: "type" }
+    ],
+    imports: [/^\s*import\s+(?:\w+\s+)?"([^"]+)"/, /^\s+(?:\w+\s+)?"([^"]+)"\s*$/]
+  },
+  rust: {
+    id: "rust",
+    comment: SLASH,
+    rules: [
+      { pattern: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+)?(?:async\s+)?(?:unsafe\s+)?(?:extern\s+"[^"]*"\s+)?fn\s+([A-Za-z_]\w*)/, kind: "function" },
+      { pattern: /^\s*(?:pub(?:\([^)]*\))?\s+)?(struct|enum|trait|union|mod|type)\s+([A-Za-z_]\w*)/, kind: (match) => match[1] === "type" ? "type" : kindOf(match[1]), name: 2 },
+      { pattern: /^\s*impl(?:<[^>]*>)?\s+(?:[\w:<>]+\s+for\s+)?([A-Za-z_]\w*)/, kind: "trait" },
+      { pattern: /^\s*macro_rules!\s*([A-Za-z_]\w*)/, kind: "macro" }
+    ],
+    imports: [/^\s*(?:pub\s+)?use\s+([\w:]+)/, /^\s*(?:pub\s+)?mod\s+(\w+)\s*;/]
+  },
+  java: {
+    id: "java",
+    comment: SLASH,
+    rules: [
+      C_LIKE_TYPES,
+      {
+        pattern: /^\s*(?:(?:public|private|protected|internal|static|final|abstract|synchronized|native|override|virtual|async|sealed|extern|unsafe|new|default)\s+)+[\w<>\[\],.?\s]*?\b([A-Za-z_]\w*)\s*\([^;]*$/,
+        kind: "method"
+      },
+      { pattern: /^\s*(?:(?:public|private|protected|internal|override|suspend|inline|private|open|operator)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?([A-Za-z_]\w*)/, kind: "function" },
+      { pattern: /^\s*(?:(?:private|override|final|implicit|lazy)\s+)*def\s+([A-Za-z_]\w*)/, kind: "function" }
+    ],
+    imports: [/^\s*import\s+(?:static\s+)?([\w.]+)/, /^\s*using\s+(?:static\s+)?([\w.]+)\s*;/]
+  },
+  c: {
+    id: "c",
+    comment: SLASH,
+    rules: [
+      { pattern: /^\s*(?:typedef\s+)?(struct|enum|union|class|namespace)\s+([A-Za-z_]\w*)\s*(?:final\s*)?(?::[^{;]*)?\{?\s*$/, kind: (match) => kindOf(match[1]), name: 2 },
+      { pattern: /^#\s*define\s+([A-Za-z_]\w*)/, kind: "macro" },
+      {
+        pattern: /^(?:[A-Za-z_][\w:<>,*&\s]*?[\s*&])?((?:[A-Za-z_]\w*::)*~?[A-Za-z_]\w*)\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?\{?\s*$/,
+        kind: "function"
+      }
+    ],
+    imports: [/^\s*#\s*include\s*[<"]([^>"]+)[>"]/]
+  },
+  php: {
+    id: "php",
+    comment: /^\s*(\/\/|#|\/\*|\*)/,
+    rules: [
+      { pattern: /^\s*(?:(?:public|private|protected|static|final|abstract)\s+)*function\s+&?([A-Za-z_]\w*)/, kind: "function" },
+      { pattern: /^\s*(?:(?:final|abstract|readonly)\s+)*(class|interface|trait|enum)\s+([A-Za-z_]\w*)/, kind: (match) => kindOf(match[1]), name: 2 }
+    ],
+    imports: [/^\s*use\s+([\w\\]+)/, /\b(?:require|include)(?:_once)?\s*\(?\s*['"]([^'"]+)['"]/]
+  },
+  ruby: {
+    id: "ruby",
+    comment: HASH,
+    rules: [
+      { pattern: /^\s*def\s+(?:self\.)?([A-Za-z_]\w*[?!=]?)/, kind: "method" },
+      { pattern: /^\s*(class|module)\s+([A-Z][\w:]*)/, kind: (match) => kindOf(match[1]), name: 2 }
+    ],
+    imports: [/^\s*require(?:_relative)?\s*\(?\s*['"]([^'"]+)['"]/]
+  },
+  swift: {
+    id: "swift",
+    comment: SLASH,
+    rules: [
+      { pattern: /^\s*(?:(?:public|private|fileprivate|internal|open|static|final|override|mutating|@\w+)\s+)*func\s+([A-Za-z_]\w*)/, kind: "function" },
+      { pattern: /^\s*(?:(?:public|private|fileprivate|internal|open|final|indirect)\s+)*(class|struct|enum|protocol|extension|actor)\s+([A-Za-z_]\w*)/, kind: (match) => kindOf(match[1]), name: 2 }
+    ],
+    imports: [/^\s*import\s+(\w+)/]
+  },
+  lua: {
+    id: "lua",
+    comment: DASH,
+    rules: [{ pattern: /^\s*(?:local\s+)?function\s+([\w.:]+)/, kind: "function" }],
+    imports: [/\brequire\s*\(?\s*['"]([^'"]+)['"]/]
+  },
+  shell: {
+    id: "shell",
+    comment: HASH,
+    rules: [
+      { pattern: /^\s*function\s+([\w-]+)/, kind: "function" },
+      { pattern: /^\s*([\w-]+)\s*\(\)\s*\{?/, kind: "function" }
+    ],
+    imports: [/^\s*(?:source|\.)\s+['"]?([^'"\s]+)/]
+  },
+  powershell: {
+    id: "powershell",
+    comment: HASH,
+    rules: [{ pattern: /^\s*function\s+([\w-]+)/i, kind: "function" }, { pattern: /^\s*class\s+(\w+)/i, kind: "class" }],
+    imports: [/^\s*(?:Import-Module|\.)\s+['"]?([^'"\s]+)/i]
+  },
+  text: { id: "text", rules: [], imports: [] },
+  markdown: {
+    id: "markdown",
+    rules: [{ pattern: /^#{1,4}\s+(.+?)\s*#*\s*$/, kind: "module" }],
+    imports: []
+  }
+};
+var EXTENSIONS = {
+  ts: "typescript",
+  tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  js: "typescript",
+  jsx: "typescript",
+  mjs: "typescript",
+  cjs: "typescript",
+  vue: "typescript",
+  svelte: "typescript",
+  astro: "typescript",
+  py: "python",
+  pyi: "python",
+  go: "go",
+  rs: "rust",
+  java: "java",
+  kt: "java",
+  kts: "java",
+  scala: "java",
+  cs: "java",
+  groovy: "java",
+  dart: "java",
+  c: "c",
+  h: "c",
+  cc: "c",
+  cpp: "c",
+  cxx: "c",
+  hpp: "c",
+  hh: "c",
+  hxx: "c",
+  m: "c",
+  mm: "c",
+  cu: "c",
+  php: "php",
+  rb: "ruby",
+  rake: "ruby",
+  swift: "swift",
+  lua: "lua",
+  sh: "shell",
+  bash: "shell",
+  zsh: "shell",
+  fish: "shell",
+  ps1: "powershell",
+  psm1: "powershell",
+  md: "markdown",
+  mdx: "markdown",
+  json: "text",
+  jsonc: "text",
+  yaml: "text",
+  yml: "text",
+  toml: "text",
+  ini: "text",
+  xml: "text",
+  html: "text",
+  htm: "text",
+  css: "text",
+  scss: "text",
+  less: "text",
+  sql: "text",
+  graphql: "text",
+  gql: "text",
+  proto: "text",
+  txt: "text",
+  gradle: "text",
+  tf: "text",
+  hcl: "text",
+  nix: "text",
+  ex: "text",
+  exs: "text",
+  erl: "text",
+  hs: "text",
+  ml: "text",
+  clj: "text",
+  r: "text",
+  jl: "text",
+  zig: "text",
+  nim: "text",
+  sol: "text",
+  smali: "text"
+};
+var NAMES = {
+  dockerfile: "text",
+  makefile: "text",
+  gemfile: "ruby",
+  rakefile: "ruby",
+  "cmakelists.txt": "text",
+  justfile: "text"
+};
+function detect(file) {
+  const base = file.slice(file.lastIndexOf("/") + 1).toLowerCase();
+  if (NAMES[base])
+    return NAMES[base];
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0)
+    return;
+  return EXTENSIONS[base.slice(dot + 1)];
+}
+function declarations(language, lines) {
+  const spec = LANGUAGES[language];
+  if (!spec?.rules.length)
+    return [];
+  const found = [];
+  let fence = false;
+  for (let index = 0;index < lines.length; index++) {
+    const line = lines[index];
+    if (language === "markdown" && /^\s*(```|~~~)/.test(line))
+      fence = !fence;
+    if (fence || line.length > 400 || spec.comment && spec.comment.test(line))
+      continue;
+    for (const rule of spec.rules) {
+      const match = rule.pattern.exec(line);
+      if (!match)
+        continue;
+      const name = match[rule.name ?? 1]?.trim();
+      if (!name || KEYWORDS.has(name) || name.length > 120)
+        continue;
+      const kind = typeof rule.kind === "function" ? rule.kind(match) : rule.kind;
+      found.push({ name, kind, line: index + 1, indent: line.length - line.trimStart().length });
+      break;
+    }
+  }
+  return found;
+}
+var BRACES = new Set(["typescript", "go", "rust", "java", "c", "php", "swift"]);
+var INDENTED = new Set(["python"]);
+function braceDelta(line, state) {
+  if (!state.quote && /^\s*(\/\*|\*)/.test(line))
+    return 0;
+  let delta = 0;
+  for (let index = 0;index < line.length; index++) {
+    const char = line[index];
+    if (state.quote) {
+      if (char === "\\")
+        index++;
+      else if (char === state.quote)
+        state.quote = "";
+      continue;
+    }
+    if (char === "/" && line[index + 1] === "/")
+      break;
+    if (char === '"' || char === "'" || char === "`")
+      state.quote = char;
+    else if (char === "{")
+      delta++;
+    else if (char === "}")
+      delta--;
+  }
+  if (state.quote && state.quote !== "`")
+    state.quote = "";
+  return delta;
+}
+function endOf(language, lines, declarations, index) {
+  const item = declarations[index];
+  const next = declarations.slice(index + 1).find((other) => other.indent <= item.indent);
+  const fallback = Math.max(item.line, next ? next.line - 1 : lines.length);
+  if (BRACES.has(language)) {
+    const state = { quote: "" };
+    let depth = 0;
+    let opened = false;
+    const first = item.line - 1;
+    for (let position = first;position < lines.length; position++) {
+      if (!opened && position - first >= 3)
+        return fallback;
+      const line = lines[position];
+      depth += braceDelta(line, state);
+      if (depth > 0)
+        opened = true;
+      if (opened && depth <= 0)
+        return position + 1;
+      if (opened)
+        continue;
+      if (/;\s*$/.test(line))
+        return position + 1;
+      if (position === first && !/[({[,=<>:|&?+\-*/]\s*$/.test(line))
+        return position + 1;
+    }
+    return fallback;
+  }
+  if (INDENTED.has(language)) {
+    let last = item.line;
+    for (let position = item.line;position < lines.length; position++) {
+      const line = lines[position];
+      if (!line.trim())
+        continue;
+      if (line.length - line.trimStart().length <= item.indent)
+        break;
+      last = position + 1;
+    }
+    return last;
+  }
+  return fallback;
+}
+function imports(language, lines) {
+  const spec = LANGUAGES[language];
+  if (!spec?.imports.length)
+    return [];
+  const found = new Set;
+  let goBlock = false;
+  for (const line of lines) {
+    if (spec.comment && spec.comment.test(line))
+      continue;
+    if (language === "go") {
+      if (/^\s*import\s*\(/.test(line))
+        goBlock = true;
+      else if (goBlock && /^\s*\)/.test(line))
+        goBlock = false;
+      if (!goBlock && /^\s+/.test(line) && !/^\s*import/.test(line))
+        continue;
+    }
+    for (const pattern of spec.imports) {
+      const match = pattern.exec(line);
+      if (match?.[1])
+        found.add(match[1]);
+    }
+  }
+  return [...found];
+}
+
+// src/server/codeindex/store.ts
+import { Database } from "bun:sqlite";
+import { createHash as createHash2 } from "crypto";
+import { mkdirSync } from "fs";
+import path7 from "path";
+var VERSION = "5";
+var folder = () => path7.join(Path.data, "opencode-mod", "code-index");
+var fileFor = (root) => path7.join(folder(), `${createHash2("sha1").update(path7.resolve(root).toLowerCase()).digest("hex").slice(0, 16)}.sqlite`);
+var SCHEMA = `
+CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, mtime REAL, size INTEGER, hash TEXT, lang TEXT, lines INTEGER);
+CREATE TABLE IF NOT EXISTS chunks(id INTEGER PRIMARY KEY, path TEXT, start INTEGER, end INTEGER, symbol TEXT, hash TEXT);
+CREATE INDEX IF NOT EXISTS chunks_path ON chunks(path);
+CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(name, path, body, tokenize='porter unicode61');
+CREATE TABLE IF NOT EXISTS symbols(path TEXT, name TEXT, lname TEXT, kind TEXT, line INTEGER, end INTEGER, parent TEXT, signature TEXT);
+CREATE INDEX IF NOT EXISTS symbols_lname ON symbols(lname);
+CREATE INDEX IF NOT EXISTS symbols_path ON symbols(path);
+CREATE TABLE IF NOT EXISTS imports(path TEXT, spec TEXT);
+CREATE INDEX IF NOT EXISTS imports_path ON imports(path);
+CREATE TABLE IF NOT EXISTS vectors(hash TEXT, model TEXT, vector BLOB, PRIMARY KEY(hash, model));
+`;
+function open2(root) {
+  mkdirSync(folder(), { recursive: true });
+  const db = new Database(fileFor(root), { create: true });
+  db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000; PRAGMA synchronous=NORMAL;");
+  db.exec("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);");
+  const version = db.query("SELECT value FROM meta WHERE key = 'version'").get()?.value;
+  if (version !== VERSION) {
+    db.exec("DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS chunks; DROP TABLE IF EXISTS chunk_fts; DROP TABLE IF EXISTS symbols; DROP TABLE IF EXISTS imports; DROP TABLE IF EXISTS vectors;");
+  }
+  db.exec(SCHEMA);
+  db.query("INSERT OR REPLACE INTO meta(key, value) VALUES ('version', ?)").run(VERSION);
+  db.query("INSERT OR REPLACE INTO meta(key, value) VALUES ('root', ?)").run(path7.resolve(root));
+  const statements = {
+    files: db.query("SELECT * FROM files"),
+    file: db.query("SELECT * FROM files WHERE path = ?"),
+    chunkIds: db.query("SELECT id FROM chunks WHERE path = ?"),
+    deleteFts: db.query("DELETE FROM chunk_fts WHERE rowid = ?"),
+    deleteChunks: db.query("DELETE FROM chunks WHERE path = ?"),
+    deleteSymbols: db.query("DELETE FROM symbols WHERE path = ?"),
+    deleteImports: db.query("DELETE FROM imports WHERE path = ?"),
+    deleteFile: db.query("DELETE FROM files WHERE path = ?"),
+    insertFile: db.query("INSERT OR REPLACE INTO files(path, mtime, size, hash, lang, lines) VALUES (?, ?, ?, ?, ?, ?)"),
+    insertChunk: db.query("INSERT INTO chunks(path, start, end, symbol, hash) VALUES (?, ?, ?, ?, ?)"),
+    insertFts: db.query("INSERT INTO chunk_fts(rowid, name, path, body) VALUES (?, ?, ?, ?)"),
+    insertSymbol: db.query("INSERT INTO symbols(path, name, lname, kind, line, end, parent, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
+    insertImport: db.query("INSERT INTO imports(path, spec) VALUES (?, ?)")
+  };
+  const forget = (file) => {
+    for (const { id } of statements.chunkIds.all(file))
+      statements.deleteFts.run(id);
+    statements.deleteChunks.run(file);
+    statements.deleteSymbols.run(file);
+    statements.deleteImports.run(file);
+    statements.deleteFile.run(file);
+  };
+  const apply = db.transaction((entries, removed) => {
+    for (const file of removed)
+      forget(file);
+    for (const entry of entries) {
+      forget(entry.file.path);
+      const f = entry.file;
+      statements.insertFile.run(f.path, f.mtime, f.size, f.hash, f.lang, f.lines);
+      for (const chunk of entry.chunks) {
+        const result = statements.insertChunk.run(f.path, chunk.start, chunk.end, chunk.symbol, chunk.hash);
+        statements.insertFts.run(Number(result.lastInsertRowid), chunk.name, chunk.pathWords, chunk.body);
+      }
+      for (const symbol of entry.symbols)
+        statements.insertSymbol.run(f.path, symbol.name, symbol.name.toLowerCase(), symbol.kind, symbol.line, symbol.end, symbol.parent, symbol.signature);
+      for (const spec of entry.imports)
+        statements.insertImport.run(f.path, spec);
+    }
+  });
+  const pruneVectors = () => db.exec("DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM chunks)");
+  const counts = () => db.query("SELECT (SELECT count(*) FROM files) AS files, (SELECT count(*) FROM chunks) AS chunks, (SELECT count(*) FROM symbols) AS symbols").get() ?? { files: 0, chunks: 0, symbols: 0 };
+  const meta = (key) => db.query("SELECT value FROM meta WHERE key = ?").get(key)?.value;
+  const setMeta = (key, value) => db.query("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)").run(key, value);
+  return { db, statements, apply, pruneVectors, counts, meta, setMeta, close: () => db.close() };
+}
+
+// src/server/codeindex/tokens.ts
+var STOP = new Set([
+  "a",
+  "an",
+  "the",
+  "and",
+  "or",
+  "of",
+  "to",
+  "in",
+  "on",
+  "for",
+  "with",
+  "is",
+  "are",
+  "be",
+  "it",
+  "this",
+  "that",
+  "how",
+  "what",
+  "where",
+  "which",
+  "who",
+  "does",
+  "do",
+  "find",
+  "code",
+  "file",
+  "files",
+  "function",
+  "functions",
+  "show",
+  "me",
+  "all",
+  "any",
+  "from",
+  "by",
+  "at",
+  "as",
+  "into",
+  "when",
+  "i",
+  "we",
+  "you",
+  "can",
+  "should",
+  "there",
+  "my",
+  "our"
+]);
+var SYNONYMS = [
+  ["auth", "authenticate", "authentication", "login", "signin", "session", "token", "credential", "oauth"],
+  ["delete", "remove", "destroy", "drop", "erase", "unlink"],
+  ["create", "add", "new", "insert", "make", "build"],
+  ["update", "edit", "modify", "change", "patch", "set"],
+  ["get", "fetch", "load", "read", "retrieve", "request", "query"],
+  ["save", "write", "store", "persist", "put"],
+  ["config", "configuration", "settings", "options", "preferences", "env"],
+  ["error", "exception", "fail", "failure", "throw", "catch", "panic"],
+  ["test", "spec", "mock", "fixture", "assert", "expect"],
+  ["user", "account", "member", "profile"],
+  ["http", "api", "endpoint", "route", "handler", "controller", "server"],
+  ["db", "database", "sql", "query", "repository", "model", "schema", "migration"],
+  ["parse", "decode", "deserialize", "unmarshal"],
+  ["serialize", "encode", "marshal", "stringify"],
+  ["start", "init", "initialize", "setup", "boot", "launch"],
+  ["stop", "shutdown", "close", "dispose", "cleanup", "teardown"],
+  ["log", "logger", "logging", "trace", "debug"],
+  ["cache", "memo", "memoize"],
+  ["validate", "validation", "check", "verify", "sanitize"],
+  ["permission", "authorize", "authorization", "acl", "role", "access"],
+  ["upload", "download", "file", "stream"],
+  ["schedule", "cron", "timer", "interval", "job", "task", "queue", "worker"],
+  ["render", "view", "component", "ui", "page", "template"],
+  ["send", "emit", "publish", "notify", "dispatch"],
+  ["listen", "subscribe", "watch", "observe", "on"],
+  ["encrypt", "crypto", "hash", "sign", "cipher", "decrypt"]
+];
+var SYNONYM_OF = new Map;
+for (const group of SYNONYMS)
+  for (const word of group)
+    SYNONYM_OF.set(word, group);
+var IDENTIFIER = /[A-Za-z_$][\w$]*/g;
+function parts(identifier) {
+  return identifier.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").split(/[^A-Za-z]+/).filter((part) => part.length > 1).map((part) => part.toLowerCase());
+}
+function index(text) {
+  const words = [];
+  for (const match of text.matchAll(IDENTIFIER)) {
+    const word = match[0];
+    if (word.length < 2 || word.length > 64)
+      continue;
+    const split = parts(word);
+    const whole = word.replace(/\$/g, "").toLowerCase();
+    words.push(whole);
+    if (split.length > 1)
+      words.push(...split);
+  }
+  return words.join(" ");
+}
+function path8(file) {
+  return index(file.replace(/[\\/._-]+/g, " "));
+}
+function query(text, synonyms = false) {
+  const own = new Set;
+  const related = new Set;
+  for (const match of text.matchAll(IDENTIFIER)) {
+    const word = match[0].replace(/\$/g, "").toLowerCase();
+    if (word.length < 2)
+      continue;
+    if (!STOP.has(word))
+      own.add(word);
+    for (const part of parts(match[0])) {
+      if (STOP.has(part))
+        continue;
+      own.add(part);
+      for (const synonym of SYNONYM_OF.get(part) ?? [])
+        related.add(synonym);
+    }
+  }
+  const terms = synonyms ? [...related].filter((term) => !own.has(term)) : [...own];
+  if (!terms.length)
+    return;
+  return terms.map((term) => `"${term.replace(/"/g, "")}"`).join(" OR ");
+}
+
+// src/server/codeindex/indexer.ts
+var MAX_FILES = 60000;
+var MAX_BYTES = 1e6;
+var CHUNK_LINES = 60;
+var MAX_CHUNK = 90;
+var RESCAN_MS = 30000;
+var BATCH2 = 200;
+var IGNORED_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".hg",
+  ".svn",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  ".turbo",
+  ".cache",
+  "coverage",
+  "target",
+  "vendor",
+  "__pycache__",
+  ".venv",
+  "venv",
+  "env",
+  ".tox",
+  ".mypy_cache",
+  ".pytest_cache",
+  "bin",
+  "obj",
+  ".gradle",
+  ".idea",
+  ".vscode",
+  "Pods",
+  "DerivedData",
+  ".dart_tool",
+  ".expo",
+  "bower_components",
+  "jspm_packages",
+  ".parcel-cache",
+  ".output",
+  "storybook-static",
+  "tmp",
+  ".terraform"
+]);
+var IGNORED_FILES = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|composer\.lock|Gemfile\.lock|poetry\.lock|go\.sum)$|\.min\.(js|css)$|\.map$|\.d\.ts\.map$|\.snap$/;
+var skipped = (file) => file.split("/").some((part) => IGNORED_DIRS.has(part)) || IGNORED_FILES.test(file);
+var sha1 = (text) => createHash3("sha1").update(text).digest("hex");
+function gitFiles(root) {
+  return new Promise((resolve) => execFile("git", ["ls-files", "-co", "--exclude-standard", "-z"], { cwd: root, windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: 60000 }, (error, stdout) => resolve(error ? undefined : String(stdout).split("\x00").filter(Boolean))));
+}
+async function walk(root) {
+  const found = [];
+  const visit = async (dir) => {
+    if (found.length >= MAX_FILES)
+      return;
+    const entries = await readdir(path9.join(root, dir), { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.isSymbolicLink())
+        continue;
+      const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (!IGNORED_DIRS.has(entry.name) && !entry.name.startsWith("."))
+          await visit(rel);
+      } else if (entry.isFile())
+        found.push(rel);
+      if (found.length >= MAX_FILES)
+        return;
+    }
+  };
+  await visit("");
+  return found;
+}
+async function list(root) {
+  const files = (existsSync2(path9.join(root, ".git")) ? await gitFiles(root) : undefined) ?? await walk(root);
+  return files.map((file) => file.replace(/\\/g, "/")).filter((file) => !skipped(file) && detect(file)).slice(0, MAX_FILES);
+}
+function chunk(file, lines, declarations2) {
+  const outer = Math.min(...declarations2.map((item) => item.indent), Infinity);
+  const starts = declarations2.filter((item) => item.indent <= outer + 4).map((item) => item.line).filter((line, index2, all) => all.indexOf(line) === index2);
+  if (starts[0] !== 1)
+    starts.unshift(1);
+  const ranges = [];
+  for (let index2 = 0;index2 < starts.length; index2++) {
+    const start = starts[index2];
+    const end = (starts[index2 + 1] ?? lines.length + 1) - 1;
+    if (end < start)
+      continue;
+    const last = ranges.at(-1);
+    if (last && last.end - last.start < 4)
+      last.end = end;
+    else
+      ranges.push({ start, end });
+  }
+  const pieces = [];
+  for (const range of ranges) {
+    if (range.end - range.start + 1 <= MAX_CHUNK) {
+      pieces.push(range);
+      continue;
+    }
+    for (let start = range.start;start <= range.end; start += CHUNK_LINES - 10)
+      pieces.push({ start, end: Math.min(range.end, start + CHUNK_LINES - 1) });
+  }
+  const pathWords = path8(file);
+  return pieces.map((piece) => {
+    const text = lines.slice(piece.start - 1, piece.end).join(`
+`);
+    if (!text.trim())
+      return;
+    const inside = declarations2.filter((item) => item.line >= piece.start && item.line <= piece.end);
+    const owner = [...declarations2].reverse().find((item) => item.line <= piece.start);
+    const names = inside.map((item) => item.name);
+    return {
+      start: piece.start,
+      end: piece.end,
+      symbol: inside[0]?.name ?? owner?.name ?? "",
+      hash: sha1(`${file}
+${text}`),
+      name: index(names.join(" ")),
+      pathWords,
+      body: index(text)
+    };
+  }).filter((item) => !!item);
+}
+function symbols(lang, lines, declarations2) {
+  const ends = declarations2.map((_, index2) => endOf(lang, lines, declarations2, index2));
+  return declarations2.map((item, index2) => {
+    let parent = "";
+    for (let other = index2 - 1;other >= 0; other--) {
+      if (ends[other] >= item.line && declarations2[other].line < item.line) {
+        parent = declarations2[other].name;
+        break;
+      }
+    }
+    return {
+      name: item.name,
+      kind: item.kind,
+      line: item.line,
+      end: ends[index2],
+      parent,
+      signature: (lines[item.line - 1] ?? "").trim().slice(0, 200)
+    };
+  });
+}
+async function read(root, file) {
+  const full = path9.join(root, file);
+  const info = await stat2(full).catch(() => {
+    return;
+  });
+  if (!info?.isFile() || info.size > MAX_BYTES)
+    return;
+  const text = await readFile5(full, "utf8").catch(() => {
+    return;
+  });
+  if (text === undefined || text.slice(0, 8000).includes("\x00"))
+    return;
+  const lines = text.split(/\r?\n/);
+  if (lines.length < 3 && text.length > 5000)
+    return;
+  const lang = detect(file);
+  const declarations2 = declarations(lang, lines);
+  return {
+    file: { path: file, mtime: info.mtimeMs, size: info.size, hash: sha1(text), lang, lines: lines.length },
+    chunks: chunk(file, lines, declarations2),
+    symbols: symbols(lang, lines, declarations2),
+    imports: imports(lang, lines)
+  };
+}
+var pause = () => new Promise((resolve) => setImmediate(resolve));
+
+class Index {
+  root;
+  store;
+  refreshing;
+  scanned = 0;
+  dirty = new Set;
+  watcher;
+  timer;
+  progress = { done: 0, total: 0 };
+  error;
+  onChange;
+  constructor(root) {
+    this.root = root;
+    this.store = open2(root);
+  }
+  status() {
+    const counts = this.store.counts();
+    const built = Number(this.store.meta("built"));
+    return {
+      root: this.root,
+      ...counts,
+      building: !!this.refreshing,
+      ...this.progress,
+      ...built ? { built } : {},
+      ...this.error ? { error: this.error } : {}
+    };
+  }
+  refresh(full = false) {
+    if (this.refreshing && full)
+      return this.refreshing.catch(() => {
+        return;
+      }).then(() => this.refresh(true));
+    this.refreshing ??= this.scan(full).finally(() => {
+      this.refreshing = undefined;
+    });
+    return this.refreshing;
+  }
+  async ready() {
+    if (this.refreshing)
+      return this.refreshing;
+    if (this.dirty.size)
+      return this.flush();
+    if (Date.now() - this.scanned > RESCAN_MS)
+      return this.refresh();
+  }
+  async scan(full) {
+    this.error = undefined;
+    try {
+      const files = await list(this.root);
+      const known = new Map(this.store.statements.files.all().map((row) => [row.path, row]));
+      const present = new Set(files);
+      const removed = [...known.keys()].filter((file) => !present.has(file));
+      const changed = [];
+      for (const [index2, file] of files.entries()) {
+        if (index2 % 500 === 0)
+          await pause();
+        const row = known.get(file);
+        if (full || !row) {
+          changed.push(file);
+          continue;
+        }
+        const info = await stat2(path9.join(this.root, file)).catch(() => {
+          return;
+        });
+        if (!info)
+          removed.push(file);
+        else if (info.mtimeMs !== row.mtime || info.size !== row.size)
+          changed.push(file);
+      }
+      await this.index(changed, removed);
+      this.scanned = Date.now();
+      this.store.setMeta("built", String(this.scanned));
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      this.progress = { done: 0, total: 0 };
+    }
+  }
+  async index(files, removed) {
+    this.progress = { done: 0, total: files.length };
+    if (removed.length)
+      this.store.apply([], removed);
+    for (let offset = 0;offset < files.length; offset += BATCH2) {
+      const batch = files.slice(offset, offset + BATCH2);
+      const entries = [];
+      const gone = [];
+      for (const file of batch) {
+        const entry = await read(this.root, file);
+        if (entry)
+          entries.push(entry);
+        else
+          gone.push(file);
+      }
+      this.store.apply(entries, gone);
+      this.progress = { done: Math.min(files.length, offset + BATCH2), total: files.length };
+      await pause();
+    }
+    if (files.length || removed.length) {
+      this.store.pruneVectors();
+      this.onChange?.();
+    }
+  }
+  flush() {
+    if (this.refreshing)
+      return this.refreshing.catch(() => {
+        return;
+      }).then(() => this.dirty.size ? this.flush() : undefined);
+    const files = [...this.dirty];
+    this.dirty.clear();
+    this.refreshing = (async () => {
+      const keep = [];
+      const removed = [];
+      for (const file of files) {
+        if (skipped(file) || !detect(file))
+          continue;
+        if (existsSync2(path9.join(this.root, file)))
+          keep.push(file);
+        else
+          removed.push(file);
+      }
+      await this.index(keep, removed);
+    })().finally(() => {
+      this.refreshing = undefined;
+    });
+    return this.refreshing;
+  }
+  watch() {
+    if (this.watcher)
+      return;
+    try {
+      this.watcher = watch(this.root, { recursive: true }, (_, name) => {
+        if (!name)
+          return;
+        const file = String(name).replace(/\\/g, "/");
+        if (skipped(file) || !detect(file))
+          return;
+        this.dirty.add(file);
+        clearTimeout(this.timer);
+        this.timer = setTimeout(() => void this.flush().catch(() => {
+          return;
+        }), 1500);
+      });
+      this.watcher.on("error", () => this.unwatch());
+    } catch {
+      this.watcher = undefined;
+    }
+  }
+  unwatch() {
+    clearTimeout(this.timer);
+    this.watcher?.close();
+    this.watcher = undefined;
+  }
+  close() {
+    this.unwatch();
+    this.store.close();
+  }
+}
+var indexes = new Map;
+var key = (root) => path9.resolve(root).toLowerCase();
+function get(root) {
+  const id = key(root);
+  let found = indexes.get(id);
+  if (!found) {
+    found = new Index(path9.resolve(root));
+    indexes.set(id, found);
+  }
+  return found;
+}
+function all() {
+  return [...indexes.values()];
+}
+function closeAll() {
+  for (const index2 of indexes.values())
+    index2.close();
+  indexes.clear();
+}
+
+// src/server/codeindex/query.ts
+import { readFile as readFile6 } from "fs/promises";
+import path10 from "path";
+var SNIPPET = 14;
+var MAX_REFERENCES = 150;
+var lineCache = async (root) => {
+  const cache = new Map;
+  return async (file) => {
+    let lines = cache.get(file);
+    if (!lines) {
+      lines = (await readFile6(path10.join(root, file), "utf8").catch(() => "")).split(/\r?\n/);
+      cache.set(file, lines);
+    }
+    return lines;
+  };
+};
+var numbered = (lines, start, end, max) => {
+  const shown = lines.slice(start - 1, Math.min(end, start - 1 + max));
+  const out = shown.map((line, index) => `${String(start + index).padStart(5)}  ${line.length > 220 ? `${line.slice(0, 220)}\u2026` : line}`);
+  if (end - start + 1 > max)
+    out.push(`        \u2026 ${end - start + 1 - max} more lines`);
+  return out.join(`
+`);
+};
+var pathFilter = (filter) => (file) => !filter || file.toLowerCase().includes(filter.replace(/\\/g, "/").toLowerCase());
+async function search(index, input, embeddings) {
+  const limit = Math.min(Math.max(input.limit ?? 8, 1), 30);
+  const db = index.store.db;
+  const keep = pathFilter(input.path);
+  const ranks = new Map;
+  const add = (ids, weight) => ids.forEach((id, rank) => ranks.set(id, (ranks.get(id) ?? 0) + weight / (60 + rank)));
+  const exact = input.query.trim();
+  if (/^[A-Za-z_$][\w$.:]*$/.test(exact)) {
+    const name = exact.split(/[.:]+/).pop().toLowerCase();
+    const declared = db.query("SELECT c.id AS id FROM symbols s JOIN chunks c ON c.path = s.path AND c.start <= s.line AND c.end >= s.line WHERE s.lname = ? LIMIT 20").all(name).map((row) => row.id);
+    add(declared, 3);
+  }
+  const fullText = db.query("SELECT c.id AS id, c.path AS path, f.lang AS lang FROM chunk_fts JOIN chunks c ON c.id = chunk_fts.rowid JOIN files f ON f.path = c.path WHERE chunk_fts MATCH ? ORDER BY bm25(chunk_fts, 6.0, 2.0, 1.0) LIMIT 300");
+  const docs = /\b(readme|docs?|documentation|guide|markdown|changelog|json|yaml)\b/i.test(input.query);
+  const rank = (match, weight) => {
+    if (!match)
+      return;
+    const rows = fullText.all(match).filter((row) => keep(row.path));
+    const code = rows.filter((row) => docs || row.lang !== "markdown" && row.lang !== "text");
+    const rest = rows.filter((row) => !code.includes(row));
+    add(code.map((row) => row.id), weight);
+    add(rest.map((row) => row.id), weight * 0.4);
+  };
+  rank(query(input.query), 1);
+  rank(query(input.query, true), 0.35);
+  let semantic = "";
+  if (embeddings) {
+    try {
+      const near = await nearest(index, embeddings, input.query, 300);
+      add(near.map((item) => item.id), 1.2);
+      semantic = near.length ? " (ranked by words and meaning)" : "";
+    } catch (error) {
+      semantic = ` (meaning search failed: ${error instanceof Error ? error.message : String(error)})`;
+    }
+  }
+  const byId = db.query("SELECT id, path, start, end, symbol FROM chunks WHERE id = ?");
+  const perFile = new Map;
+  const hits = [];
+  for (const [id] of [...ranks.entries()].sort((a, b) => b[1] - a[1])) {
+    const hit = byId.get(id);
+    if (!hit || !keep(hit.path))
+      continue;
+    const count = perFile.get(hit.path) ?? 0;
+    if (count >= 3)
+      continue;
+    perFile.set(hit.path, count + 1);
+    hits.push(hit);
+    if (hits.length >= limit)
+      break;
+  }
+  if (!hits.length)
+    return `No code matched "${input.query}". Try other words, a name, or the references action.`;
+  const lines = await lineCache(index.root);
+  const blocks = await Promise.all(hits.map(async (hit, position) => {
+    const text = await lines(hit.path);
+    const title = `${position + 1}. ${hit.path}:${hit.start}-${hit.end}${hit.symbol ? `  ${hit.symbol}` : ""}`;
+    return `${title}
+${numbered(text, hit.start, hit.end, input.full ? 120 : SNIPPET)}`;
+  }));
+  return `${hits.length} results for "${input.query}"${semantic}:
+
+${blocks.join(`
+
+`)}`;
+}
+function symbols2(index, input) {
+  const limit = Math.min(Math.max(input.limit ?? 30, 1), 200);
+  const name = input.query.trim().toLowerCase();
+  if (!name)
+    return "Give a name, or part of one.";
+  const keep = pathFilter(input.path);
+  const rows = index.store.db.query(`SELECT path, name, kind, line, end, parent, signature,
+         CASE WHEN lname = ? THEN 0 WHEN lname LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END AS rank
+       FROM symbols WHERE lname LIKE ? ESCAPE '\\' AND (? = '' OR kind = ?)
+       ORDER BY rank, length(name), path LIMIT 1000`).all(name, `${escapeLike(name)}%`, `%${escapeLike(name)}%`, input.kind ?? "", input.kind ?? "").filter((row) => keep(row.path)).slice(0, limit);
+  if (!rows.length)
+    return `No declaration named like "${input.query}". Try the search action.`;
+  return rows.map((row) => `${row.path}:${row.line}-${row.end}  ${row.kind} ${row.parent ? `${row.parent}.` : ""}${row.name}
+        ${row.signature}`).join(`
+`);
+}
+var escapeLike = (text) => text.replace(/[\\%_]/g, (char) => `\\${char}`);
+var escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+async function references(index, input) {
+  const symbol = input.symbol.trim().split(/[.:]+/).pop() ?? "";
+  if (!/^[A-Za-z_$][\w$]*$/.test(symbol))
+    return "Give one identifier, such as fetchUser or UserService.";
+  const db = index.store.db;
+  const keep = pathFilter(input.path);
+  const lower = symbol.toLowerCase();
+  const files = db.query("SELECT DISTINCT c.path AS path FROM chunk_fts JOIN chunks c ON c.id = chunk_fts.rowid WHERE chunk_fts MATCH ? LIMIT 2000").all(`body:"${lower.replace(/\$/g, "")}" OR name:"${lower.replace(/\$/g, "")}"`).map((row) => row.path).filter(keep);
+  const declared = db.query("SELECT path, name, kind, line, end, parent, signature FROM symbols WHERE name = ?").all(symbol);
+  const enclosing = db.query("SELECT name, parent, kind FROM symbols WHERE path = ? AND line <= ? AND end >= ? ORDER BY line DESC LIMIT 1");
+  const pattern = new RegExp(`(?<![\\w$])${escapeRegex(symbol)}(?![\\w$])`);
+  const call = new RegExp(`(?:new\\s+)?${escapeRegex(symbol)}\\s*(?:<[^>()]*>)?\\s*\\(`);
+  const importLine = /^\s*(import|from|export\s.*\sfrom|use|using|#\s*include|require|const .*require\()/;
+  const lines = await lineCache(index.root);
+  const groups = { definition: [], import: [], call: [], reference: [] };
+  let total = 0;
+  for (const file of files) {
+    const text = await lines(file);
+    for (let position = 0;position < text.length; position++) {
+      const line = text[position];
+      if (!pattern.test(line))
+        continue;
+      total++;
+      const number = position + 1;
+      const isDefinition = declared.some((item) => item.path === file && item.line === number);
+      const kind = isDefinition ? "definition" : importLine.test(line) ? "import" : call.test(line) ? "call" : "reference";
+      const count = groups.definition.length + groups.import.length + groups.call.length + groups.reference.length;
+      if (count >= MAX_REFERENCES)
+        continue;
+      const owner = isDefinition ? undefined : enclosing.get(file, number, number);
+      const where = owner ? `  in ${owner.kind} ${owner.parent ? `${owner.parent}.` : ""}${owner.name}` : "";
+      groups[kind].push(`${file}:${number}${where}
+        ${line.trim().slice(0, 200)}`);
+    }
+  }
+  if (!total)
+    return `"${symbol}" does not appear in the indexed code.`;
+  const section = (title, items) => items.length ? `${title} (${items.length}):
+${items.join(`
+`)}` : "";
+  const callers = [...new Set(groups.call.map((item) => item.split("  in ")[1]?.split(`
+`)[0]).filter(Boolean))];
+  return [
+    `"${symbol}": ${total} occurrences in ${files.length} files${total > MAX_REFERENCES ? ` (first ${MAX_REFERENCES} shown)` : ""}.`,
+    callers.length ? `Called from: ${callers.slice(0, 40).join(", ")}` : "",
+    section("Definitions", groups.definition),
+    section("Calls", groups.call),
+    section("Imports", groups.import),
+    section("Other uses", groups.reference)
+  ].filter(Boolean).join(`
+
+`);
+}
+var normal = (file) => file.replace(/\\/g, "/").replace(/^\.\//, "");
+function outline(index, input) {
+  const file = normal(input.file);
+  const rows = index.store.db.query("SELECT path, name, kind, line, end, parent, signature FROM symbols WHERE path = ? ORDER BY line").all(relative(index, file));
+  if (!rows.length)
+    return `No declarations indexed for ${file}. Check the path (relative to ${index.root}).`;
+  const depth = new Map;
+  return rows.map((row) => {
+    const level = row.parent ? (depth.get(row.parent) ?? 0) + 1 : 0;
+    depth.set(row.name, level);
+    return `${"  ".repeat(level)}${row.line}-${row.end}  ${row.kind} ${row.name}`;
+  }).join(`
+`);
+}
+var relative = (index, file) => path10.isAbsolute(file) ? normal(path10.relative(index.root, file)) : normal(file);
+var CANDIDATE_SUFFIXES = [
+  "",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".d.ts",
+  ".py",
+  ".go",
+  ".rs",
+  ".rb",
+  ".php",
+  ".lua",
+  ".h",
+  ".hpp",
+  "/index.ts",
+  "/index.tsx",
+  "/index.js",
+  "/index.jsx",
+  "/__init__.py",
+  "/mod.rs"
+];
+function resolve(spec, from, known) {
+  const dir = path10.posix.dirname(from);
+  const bases = [];
+  if (spec.startsWith(".")) {
+    const python = /^\.+[\w.]*$/.test(spec) && !spec.includes("/") && from.endsWith(".py");
+    if (python) {
+      const ups = spec.match(/^\.+/)[0].length - 1;
+      const rest = spec.slice(ups + 1).replace(/\./g, "/");
+      bases.push(path10.posix.join(dir, "../".repeat(ups), rest));
+    } else
+      bases.push(path10.posix.join(dir, spec.replace(/\.(js|mjs|cjs|jsx)$/, "")), path10.posix.join(dir, spec));
+  } else {
+    bases.push(spec.replace(/\./g, "/"), spec, spec.replace(/::/g, "/"), path10.posix.join(dir, spec));
+  }
+  for (const base of bases)
+    for (const suffix of CANDIDATE_SUFFIXES) {
+      const candidate = normal(path10.posix.normalize(base + suffix));
+      if (!candidate.startsWith("..") && known(candidate))
+        return candidate;
+    }
+  return;
+}
+function dependencies(index, input) {
+  const db = index.store.db;
+  const file = relative(index, normal(input.file));
+  const has = db.query("SELECT path FROM files WHERE path = ?");
+  if (!has.get(file))
+    return `${file} is not indexed. Paths are relative to ${index.root}.`;
+  const known = (candidate) => !!has.get(candidate);
+  const own = db.query("SELECT spec FROM imports WHERE path = ?").all(file);
+  const imports = own.map((row) => {
+    const target = resolve(row.spec, file, known);
+    return target ? `${row.spec} \u2192 ${target}` : `${row.spec} (external)`;
+  });
+  const stem = path10.posix.basename(file).replace(/\.[^.]+$/, "");
+  const name = stem === "index" || stem === "__init__" || stem === "mod" ? path10.posix.basename(path10.posix.dirname(file)) : stem;
+  const candidates = db.query("SELECT path, spec FROM imports WHERE spec LIKE ? ESCAPE '\\'").all(`%${escapeLike(name)}%`);
+  const importers = [
+    ...new Set(candidates.filter((row) => row.path !== file && resolve(row.spec, row.path, known) === file).map((row) => row.path))
+  ];
+  return [
+    `${file}`,
+    `Imports (${imports.length}):${imports.length ? `
+  ${imports.join(`
+  `)}` : " none"}`,
+    `Imported by (${importers.length}):${importers.length ? `
+  ${importers.sort().join(`
+  `)}` : " none found"}`
+  ].join(`
+`);
+}
+
+// src/server/codeindex/plugin.ts
+var Parameters2 = Schema3.Struct({
+  action: Schema3.Literals(["search", "symbols", "references", "outline", "dependencies", "status"]),
+  query: Schema3.optional(Schema3.String).annotate({ description: "search: what the code does, or a name. symbols: a name or part of one" }),
+  symbol: Schema3.optional(Schema3.String).annotate({ description: "references: one identifier" }),
+  file: Schema3.optional(Schema3.String).annotate({ description: "outline, dependencies: a file path relative to the project" }),
+  path: Schema3.optional(Schema3.String).annotate({ description: "Only files whose path contains this" }),
+  kind: Schema3.optional(Schema3.String).annotate({ description: "symbols: only this kind of declaration" }),
+  limit: Schema3.optional(Schema3.Number).annotate({ description: "How many results; search defaults to 8 (max 30)" }),
+  full: Schema3.optional(Schema3.Boolean).annotate({ description: "search: show whole chunks instead of their first lines" })
+});
+function embeddingsOf(settings) {
+  const value = settings.embeddings;
+  if (!value.enabled || !value.baseURL.trim() || !value.model.trim())
+    return;
+  return { baseURL: value.baseURL.trim(), model: value.model.trim(), ...value.apiKey.trim() ? { apiKey: value.apiKey.trim() } : {} };
+}
+var need = (value, field, action) => {
+  if (!value?.trim())
+    throw new Error(`${action} needs ${field}`);
+  return value;
+};
+async function act(params, directory, settings) {
+  const index = start(directory, settings);
+  await index.ready();
+  const embeddings = embeddingsOf(settings);
+  switch (params.action) {
+    case "search":
+      return search(index, {
+        query: need(params.query, "query", "search"),
+        ...params.path ? { path: params.path } : {},
+        ...params.limit ? { limit: params.limit } : {},
+        ...params.full ? { full: true } : {}
+      }, embeddings);
+    case "symbols":
+      return symbols2(index, {
+        query: need(params.query ?? params.symbol, "query", "symbols"),
+        ...params.kind ? { kind: params.kind } : {},
+        ...params.path ? { path: params.path } : {},
+        ...params.limit ? { limit: params.limit } : {}
+      });
+    case "references":
+      return references(index, {
+        symbol: need(params.symbol ?? params.query, "symbol", "references"),
+        ...params.path ? { path: params.path } : {}
+      });
+    case "outline":
+      return outline(index, { file: need(params.file, "file", "outline") });
+    case "dependencies":
+      return dependencies(index, { file: need(params.file, "file", "dependencies") });
+    case "status": {
+      const status2 = index.status();
+      const meaning = status(index, embeddings);
+      return [
+        `${status2.root}: ${status2.files} files, ${status2.symbols} declarations, ${status2.chunks} chunks.`,
+        status2.built ? `Updated ${new Date(status2.built).toLocaleString()}.` : "",
+        meaning ? `Meaning search: ${meaning.embedded}/${status2.chunks} chunks embedded with ${meaning.model}.` : ""
+      ].filter(Boolean).join(" ");
+    }
+  }
+}
+function start(directory, settings) {
+  const index = get(directory);
+  const embeddings = embeddingsOf(settings);
+  index.onChange = embeddings ? () => fill(index, embeddings) : undefined;
+  if (!started.has(index.root)) {
+    started.add(index.root);
+    index.watch();
+    index.refresh().then(() => index.onChange?.()).catch(() => {
+      return;
+    });
+  }
+  return index;
+}
+var started = new Set;
+function configure(settings) {
+  if (!settings.enabled)
+    return stopAll();
+  const embeddings = embeddingsOf(settings);
+  for (const index of all()) {
+    if (!embeddings)
+      stop2(index.root);
+    index.onChange = embeddings ? () => fill(index, embeddings) : undefined;
+    index.onChange?.();
+  }
+}
+function stopAll() {
+  for (const index of all())
+    stop2(index.root);
+  closeAll();
+  started.clear();
+}
+async function rebuild(root, settings) {
+  const index = start(root, settings);
+  await index.refresh(true);
+  index.onChange?.();
+}
+function statuses(settings) {
+  const embeddings = embeddingsOf(settings);
+  return all().map((index) => {
+    const meaning = status(index, embeddings);
+    return { ...index.status(), ...meaning ? { embeddings: meaning } : {} };
+  });
+}
+var message2 = (error) => error instanceof Error ? error.message : String(error);
+var register2 = Effect3.fn("CodeIndexPlugin.register")(function* (ctx, settings) {
+  const directory = ctx.location.directory;
+  if (settings().enabled)
+    setTimeout(() => {
+      if (settings().enabled)
+        start(directory, settings());
+    }, 3000);
+  yield* ctx.tool.transform((editor) => {
+    if (!settings().enabled)
+      return;
+    editor.add({
+      name: "codebase",
+      description: description_default2,
+      input: Parameters2,
+      options: { permission: "codebase", codemode: false },
+      execute: (input) => Effect3.tryPromise({
+        try: () => act(input, directory, settings()),
+        catch: (error) => new Error2({ message: message2(error), error })
+      }).pipe(Effect3.map((text) => ({ content: text, metadata: { title: `codebase ${input.action}` } })))
+    });
+  }).pipe(Effect3.orDie);
+});
 
 // src/server/config.ts
-import { existsSync as existsSync2 } from "fs";
-import { mkdir as mkdir4, readFile as readFile4, writeFile as writeFile4 } from "fs/promises";
-import path6 from "path";
+import { existsSync as existsSync3 } from "fs";
+import { mkdir as mkdir4, readFile as readFile7, writeFile as writeFile4 } from "fs/promises";
+import path11 from "path";
 
 // node_modules/jsonc-parser/lib/esm/impl/scanner.js
 function createScanner(text, ignoreTrivia = false) {
@@ -5293,10 +6789,10 @@ function directory() {
   return Path.config;
 }
 function file2(dir = directory()) {
-  const jsonc = path6.join(dir, "opencode.jsonc");
-  if (existsSync2(jsonc))
+  const jsonc = path11.join(dir, "opencode.jsonc");
+  if (existsSync3(jsonc))
     return jsonc;
-  return path6.join(dir, "opencode.json");
+  return path11.join(dir, "opencode.json");
 }
 
 class ParseFailure extends Error {
@@ -5313,13 +6809,13 @@ function parseObject(text, at) {
   return value;
 }
 async function text(target) {
-  return readFile4(target, "utf8").catch((error) => {
+  return readFile7(target, "utf8").catch((error) => {
     if (error.code === "ENOENT")
       return "";
     throw error;
   });
 }
-async function read(target = file2()) {
+async function read2(target = file2()) {
   const contents = await text(target);
   const config = parseObject(contents, target);
   return {
@@ -5341,19 +6837,19 @@ async function write(segments, value, target = file2()) {
   if (!KEYS.includes(key))
     throw new ParseFailure(`The Mod settings cannot change "${key}"`);
   const next = edit(await text(target), segments, value);
-  await mkdir4(path6.dirname(target), { recursive: true });
+  await mkdir4(path11.dirname(target), { recursive: true });
   await writeFile4(target, next.endsWith(`
 `) ? next : `${next}
 `);
-  return read(target);
+  return read2(target);
 }
 
 // src/server/hooks.ts
 import { spawn as spawn3 } from "child_process";
 import { randomUUID } from "crypto";
-import { mkdir as mkdir5, readFile as readFile5, rename as rename2, writeFile as writeFile5 } from "fs/promises";
-import path7 from "path";
-import { Effect as Effect3, Stream as Stream2 } from "effect";
+import { mkdir as mkdir5, readFile as readFile8, rename as rename2, writeFile as writeFile5 } from "fs/promises";
+import path12 from "path";
+import { Effect as Effect4, Stream as Stream2 } from "effect";
 var EVENTS = [
   "PreToolUse",
   "PostToolUse",
@@ -5362,10 +6858,10 @@ var EVENTS = [
   "PermissionAsked",
   "SessionError"
 ];
-var file3 = () => path7.join(Path.config, "hooks.json");
-async function list() {
+var file3 = () => path12.join(Path.config, "hooks.json");
+async function list2() {
   try {
-    const parsed = JSON.parse(await readFile5(file3(), "utf8"));
+    const parsed = JSON.parse(await readFile8(file3(), "utf8"));
     return (parsed.hooks ?? []).filter((hook) => EVENTS.includes(hook.event) && typeof hook.command === "string");
   } catch {
     return [];
@@ -5387,7 +6883,7 @@ async function save2(hooks) {
       enabled: hook.enabled !== false
     };
   });
-  await mkdir5(path7.dirname(file3()), { recursive: true });
+  await mkdir5(path12.dirname(file3()), { recursive: true });
   const temp = `${file3()}.${process.pid}.tmp`;
   await writeFile5(temp, JSON.stringify({ hooks: clean }, null, 2));
   await rename2(temp, file3());
@@ -5427,7 +6923,7 @@ function wildcard(target, pattern) {
 }
 var matches = (hook, target) => !hook.matcher || hook.matcher === "*" || target !== undefined && hook.matcher.split("|").some((part) => wildcard(target, part.trim()));
 async function fire(event, target, payload, cwd) {
-  const hooks = (await list()).filter((hook) => hook.enabled && hook.event === event && matches(hook, target));
+  const hooks = (await list2()).filter((hook) => hook.enabled && hook.event === event && matches(hook, target));
   const results = [];
   for (const hook of hooks) {
     const result = await run2(hook.command, { event, ...payload }, {
@@ -5448,17 +6944,17 @@ var appendText = (content, text) => {
 ${text}`;
   return [...content, { type: "text", text }];
 };
-var register2 = Effect3.fn("ModHooks.register")(function* (ctx) {
+var register3 = Effect4.fn("ModHooks.register")(function* (ctx) {
   const cwd = ctx.location.directory;
-  yield* ctx.tool.hook("execute.before", (event) => Effect3.promise(() => fire("PreToolUse", event.tool, { sessionID: event.sessionID, tool: event.tool, input: event.input, directory: cwd }, cwd)).pipe(Effect3.flatMap((results) => {
+  yield* ctx.tool.hook("execute.before", (event) => Effect4.promise(() => fire("PreToolUse", event.tool, { sessionID: event.sessionID, tool: event.tool, input: event.input, directory: cwd }, cwd)).pipe(Effect4.flatMap((results) => {
     const blocked = results.find(({ result }) => result.code === 2);
     if (!blocked)
-      return Effect3.void;
-    return Effect3.fail(new Error2({
+      return Effect4.void;
+    return Effect4.fail(new Error2({
       message: `Blocked by hook "${blocked.hook.name}": ${blocked.result.stderr || "no reason given"}`
     }));
   })));
-  yield* ctx.tool.hook("execute.after", (event) => Effect3.promise(async () => {
+  yield* ctx.tool.hook("execute.after", (event) => Effect4.promise(async () => {
     const output = event.status === "completed" ? event.result.content : event.error.message;
     for (const { hook, result } of await fire("PostToolUse", event.tool, { sessionID: event.sessionID, tool: event.tool, input: event.input, output, directory: cwd }, cwd))
       if (event.status === "completed" && result.code === 2 && result.stderr)
@@ -5467,7 +6963,7 @@ var register2 = Effect3.fn("ModHooks.register")(function* (ctx) {
           content: appendText(event.result.content, `[hook "${hook.name}"]: ${result.stderr}`)
         };
   }));
-  yield* ctx.session.hook("prompt", (event) => Effect3.promise(async () => {
+  yield* ctx.session.hook("prompt", (event) => Effect4.promise(async () => {
     for (const { hook, result } of await fire("UserPromptSubmit", undefined, { sessionID: event.sessionID, prompt: event.prompt.text, directory: cwd }, cwd)) {
       const extra = result.code === 0 ? result.stdout : result.code === 2 ? result.stderr : "";
       if (extra)
@@ -5477,7 +6973,7 @@ var register2 = Effect3.fn("ModHooks.register")(function* (ctx) {
 ${extra}`;
     }
   }));
-  yield* ctx.event.subscribe().pipe(Stream2.runForEach((event) => Effect3.promise(async () => {
+  yield* ctx.event.subscribe().pipe(Stream2.runForEach((event) => Effect4.promise(async () => {
     const data = event.data ?? {};
     if (event.type === "session.status" && data.status?.type === "idle")
       await fire("SessionIdle", undefined, { sessionID: data.sessionID, directory: cwd }, cwd);
@@ -5485,14 +6981,14 @@ ${extra}`;
       await fire("PermissionAsked", String(data.action ?? ""), { ...data, directory: cwd }, cwd);
     else if (event.type === "session.execution.failed")
       await fire("SessionError", undefined, { ...data, directory: cwd }, cwd);
-  }).pipe(Effect3.ignore)), Effect3.forkScoped({ startImmediately: true }));
+  }).pipe(Effect4.ignore)), Effect4.forkScoped({ startImmediately: true }));
 });
 
 // src/server/memory.ts
 import { randomUUID as randomUUID2 } from "crypto";
-import { mkdir as mkdir6, readFile as readFile6, rename as rename3, writeFile as writeFile6 } from "fs/promises";
-import path8 from "path";
-import { Effect as Effect4, Schema as Schema3 } from "effect";
+import { mkdir as mkdir6, readFile as readFile9, rename as rename3, writeFile as writeFile6 } from "fs/promises";
+import path13 from "path";
+import { Effect as Effect5, Schema as Schema4 } from "effect";
 
 // src/server/memory.txt
 var memory_default = `Saves facts that should carry over to future sessions with this user. Saved facts appear in a <memory> block at the start of every session.
@@ -5512,8 +7008,8 @@ Keep each fact to one short sentence. Before saving, check the <memory> block an
 // src/server/memory.ts
 var MAX_TEXT = 500;
 var PROMPT_BUDGET = 6000;
-var file4 = () => path8.join(Path.data, "memory.json");
-var norm = (dir) => path8.resolve(dir).toLowerCase();
+var file4 = () => path13.join(Path.data, "memory.json");
+var norm = (dir) => path13.resolve(dir).toLowerCase();
 var queue = Promise.resolve();
 function locked(fn) {
   const result = queue.then(fn, fn);
@@ -5522,14 +7018,14 @@ function locked(fn) {
 }
 async function load2() {
   try {
-    const parsed = JSON.parse(await readFile6(file4(), "utf8"));
+    const parsed = JSON.parse(await readFile9(file4(), "utf8"));
     return { enabled: parsed.enabled !== false, entries: parsed.entries ?? [] };
   } catch {
     return { enabled: true, entries: [] };
   }
 }
 async function write2(data) {
-  await mkdir6(path8.dirname(file4()), { recursive: true });
+  await mkdir6(path13.dirname(file4()), { recursive: true });
   const temp = `${file4()}.${process.pid}.tmp`;
   await writeFile6(temp, JSON.stringify(data, null, 2));
   await rename3(temp, file4());
@@ -5605,15 +7101,15 @@ function prompt(entries) {
   ].join(`
 `);
 }
-var Parameters2 = Schema3.Struct({
-  action: Schema3.Literals(["save", "update", "forget", "list"]),
-  id: Schema3.optional(Schema3.String).annotate({ description: "The entry id, for update and forget" }),
-  text: Schema3.optional(Schema3.String).annotate({ description: "One short sentence, for save and update" }),
-  scope: Schema3.optional(Schema3.Literals(["global", "project"])).annotate({
+var Parameters3 = Schema4.Struct({
+  action: Schema4.Literals(["save", "update", "forget", "list"]),
+  id: Schema4.optional(Schema4.String).annotate({ description: "The entry id, for update and forget" }),
+  text: Schema4.optional(Schema4.String).annotate({ description: "One short sentence, for save and update" }),
+  scope: Schema4.optional(Schema4.Literals(["global", "project"])).annotate({
     description: "global = about the user everywhere; project (default) = only this project"
   })
 });
-async function act(params, directory) {
+async function act2(params, directory) {
   switch (params.action) {
     case "list": {
       const entries = await relevant(directory);
@@ -5653,21 +7149,21 @@ async function act(params, directory) {
     }
   }
 }
-var register3 = Effect4.fn("ModMemory.register")(function* (ctx) {
+var register4 = Effect5.fn("ModMemory.register")(function* (ctx) {
   const directory = ctx.location.directory;
   yield* ctx.tool.transform((editor) => {
     editor.add({
       name: "memory",
       description: memory_default,
-      input: Parameters2,
+      input: Parameters3,
       options: { permission: "memory", codemode: false },
-      execute: (input) => Effect4.tryPromise({
-        try: () => act(input, directory),
+      execute: (input) => Effect5.tryPromise({
+        try: () => act2(input, directory),
         catch: (error) => new Error2({ message: error instanceof Error ? error.message : String(error), error })
-      }).pipe(Effect4.map((text) => ({ content: text, metadata: { title: `memory ${input.action}` } })))
+      }).pipe(Effect5.map((text) => ({ content: text, metadata: { title: `memory ${input.action}` } })))
     });
-  }).pipe(Effect4.orDie);
-  yield* ctx.session.hook("context", (event) => Effect4.promise(async () => {
+  }).pipe(Effect5.orDie);
+  yield* ctx.session.hook("context", (event) => Effect5.promise(async () => {
     const data = await load2();
     if (!data.enabled)
       return;
@@ -5679,8 +7175,8 @@ var register3 = Effect4.fn("ModMemory.register")(function* (ctx) {
 
 // src/server/prompts.ts
 import { randomUUID as randomUUID3 } from "crypto";
-import { mkdir as mkdir7, readFile as readFile7, rename as rename4, writeFile as writeFile7 } from "fs/promises";
-import path9 from "path";
+import { mkdir as mkdir7, readFile as readFile10, rename as rename4, writeFile as writeFile7 } from "fs/promises";
+import path14 from "path";
 
 // src/server/prompts/anthropic.txt
 var anthropic_default = `# Code comments
@@ -6113,9 +7609,9 @@ async function upstreamPrompts() {
   } catch {}
   return complete({ ...BUNDLED, ...fetched });
 }
-var file5 = () => path9.join(Path.data, "mod-prompts.json");
+var file5 = () => path14.join(Path.data, "mod-prompts.json");
 async function library() {
-  const parsed = await readFile7(file5(), "utf8").then((text) => JSON.parse(text)).catch(() => {
+  const parsed = await readFile10(file5(), "utf8").then((text) => JSON.parse(text)).catch(() => {
     return;
   });
   if (!parsed || typeof parsed !== "object" || !("prompts" in parsed) || !Array.isArray(parsed.prompts))
@@ -6123,7 +7619,7 @@ async function library() {
   return parsed.prompts.filter((item) => typeof item.name === "string" && typeof item.content === "string");
 }
 async function write3(prompts) {
-  await mkdir7(path9.dirname(file5()), { recursive: true });
+  await mkdir7(path14.dirname(file5()), { recursive: true });
   const temp = `${file5()}.${process.pid}.tmp`;
   await writeFile7(temp, JSON.stringify({ prompts }, null, 2));
   await rename4(temp, file5());
@@ -6143,8 +7639,8 @@ async function drop(id) {
 }
 
 // src/server/providers.ts
-import { readFile as readFile8 } from "fs/promises";
-import path10 from "path";
+import { readFile as readFile11 } from "fs/promises";
+import path15 from "path";
 var text2 = (value) => typeof value === "string" && value.trim() ? value.trim() : undefined;
 function parse5(body) {
   if (!body || typeof body !== "object")
@@ -6169,7 +7665,7 @@ function parse5(body) {
   });
 }
 async function savedKey(provider) {
-  const auth = await readFile8(path10.join(Path.data, "auth.json"), "utf8").then((body) => JSON.parse(body)).catch(() => {
+  const auth = await readFile11(path15.join(Path.data, "auth.json"), "utf8").then((body) => JSON.parse(body)).catch(() => {
     return;
   });
   const entry = auth?.[provider];
@@ -6209,84 +7705,84 @@ async function fetchModels(input) {
 }
 
 // src/server/rpc.ts
-import { Schema as Schema5 } from "effect";
+import { Schema as Schema6 } from "effect";
 import { Rpc } from "@opencode/plugin/rpc";
 
 // src/server/schedule/schedule.ts
-import { Schema as Schema4 } from "effect";
-var Time = Schema4.String.check(Schema4.makeFilter((value) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? undefined : "Expected HH:MM (24-hour)"));
-var Trigger = Schema4.Union([
-  Schema4.Struct({ kind: Schema4.Literal("once"), at: Schema4.Finite }),
-  Schema4.Struct({ kind: Schema4.Literal("interval"), minutes: Schema4.Finite }),
-  Schema4.Struct({ kind: Schema4.Literal("daily"), time: Time }),
-  Schema4.Struct({ kind: Schema4.Literal("weekly"), time: Time, days: Schema4.Array(Schema4.Finite) }),
-  Schema4.Struct({ kind: Schema4.Literal("monthly"), time: Time, day: Schema4.Finite }),
-  Schema4.Struct({ kind: Schema4.Literal("cron"), expression: Schema4.String })
+import { Schema as Schema5 } from "effect";
+var Time = Schema5.String.check(Schema5.makeFilter((value) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? undefined : "Expected HH:MM (24-hour)"));
+var Trigger = Schema5.Union([
+  Schema5.Struct({ kind: Schema5.Literal("once"), at: Schema5.Finite }),
+  Schema5.Struct({ kind: Schema5.Literal("interval"), minutes: Schema5.Finite }),
+  Schema5.Struct({ kind: Schema5.Literal("daily"), time: Time }),
+  Schema5.Struct({ kind: Schema5.Literal("weekly"), time: Time, days: Schema5.Array(Schema5.Finite) }),
+  Schema5.Struct({ kind: Schema5.Literal("monthly"), time: Time, day: Schema5.Finite }),
+  Schema5.Struct({ kind: Schema5.Literal("cron"), expression: Schema5.String })
 ]).annotate({ identifier: "ScheduleTrigger" });
-var PermissionMode = Schema4.Literals(["ask", "deny", "allow"]);
-var ModelChoice = Schema4.Struct({
-  providerID: Schema4.String,
-  modelID: Schema4.String,
-  variant: Schema4.optional(Schema4.String)
+var PermissionMode = Schema5.Literals(["ask", "deny", "allow"]);
+var ModelChoice = Schema5.Struct({
+  providerID: Schema5.String,
+  modelID: Schema5.String,
+  variant: Schema5.optional(Schema5.String)
 });
-var TaskInput = Schema4.Struct({
-  name: Schema4.String,
-  prompt: Schema4.String,
-  directory: Schema4.String,
+var TaskInput = Schema5.Struct({
+  name: Schema5.String,
+  prompt: Schema5.String,
+  directory: Schema5.String,
   trigger: Trigger,
-  enabled: Schema4.optional(Schema4.Boolean),
-  agent: Schema4.optional(Schema4.String),
-  model: Schema4.optional(ModelChoice),
-  permission: Schema4.optional(PermissionMode),
-  catchUp: Schema4.optional(Schema4.Boolean).annotate({
+  enabled: Schema5.optional(Schema5.Boolean),
+  agent: Schema5.optional(Schema5.String),
+  model: Schema5.optional(ModelChoice),
+  permission: Schema5.optional(PermissionMode),
+  catchUp: Schema5.optional(Schema5.Boolean).annotate({
     description: "Run once at startup if a run was missed while the computer was off or asleep"
   }),
-  notify: Schema4.optional(Schema4.Boolean),
-  timeoutMinutes: Schema4.optional(Schema4.Finite)
+  notify: Schema5.optional(Schema5.Boolean),
+  timeoutMinutes: Schema5.optional(Schema5.Finite)
 }).annotate({ identifier: "ScheduleTaskInput" });
-var TaskPatch = Schema4.Struct({
-  name: Schema4.optional(Schema4.String),
-  prompt: Schema4.optional(Schema4.String),
-  directory: Schema4.optional(Schema4.String),
-  trigger: Schema4.optional(Trigger),
-  enabled: Schema4.optional(Schema4.Boolean),
-  agent: Schema4.optional(Schema4.String),
-  model: Schema4.optional(ModelChoice),
-  permission: Schema4.optional(PermissionMode),
-  catchUp: Schema4.optional(Schema4.Boolean),
-  notify: Schema4.optional(Schema4.Boolean),
-  timeoutMinutes: Schema4.optional(Schema4.Finite)
+var TaskPatch = Schema5.Struct({
+  name: Schema5.optional(Schema5.String),
+  prompt: Schema5.optional(Schema5.String),
+  directory: Schema5.optional(Schema5.String),
+  trigger: Schema5.optional(Trigger),
+  enabled: Schema5.optional(Schema5.Boolean),
+  agent: Schema5.optional(Schema5.String),
+  model: Schema5.optional(ModelChoice),
+  permission: Schema5.optional(PermissionMode),
+  catchUp: Schema5.optional(Schema5.Boolean),
+  notify: Schema5.optional(Schema5.Boolean),
+  timeoutMinutes: Schema5.optional(Schema5.Finite)
 }).annotate({ identifier: "ScheduleTaskPatch" });
-var RunStatus = Schema4.Literals(["running", "success", "failed", "timeout", "cancelled", "skipped", "missed"]);
-var Run = Schema4.Struct({
-  id: Schema4.String,
-  taskID: Schema4.String,
-  reason: Schema4.Literals(["schedule", "manual", "catchup"]),
-  started: Schema4.Finite,
-  finished: Schema4.optional(Schema4.Finite),
+var RunStatus = Schema5.Literals(["running", "success", "failed", "timeout", "cancelled", "skipped", "missed"]);
+var Run = Schema5.Struct({
+  id: Schema5.String,
+  taskID: Schema5.String,
+  reason: Schema5.Literals(["schedule", "manual", "catchup"]),
+  started: Schema5.Finite,
+  finished: Schema5.optional(Schema5.Finite),
   status: RunStatus,
-  sessionID: Schema4.optional(Schema4.String),
-  directory: Schema4.String,
-  error: Schema4.optional(Schema4.String),
-  handled: Schema4.optional(Schema4.Finite).annotate({ description: "Prompts answered automatically" })
+  sessionID: Schema5.optional(Schema5.String),
+  directory: Schema5.String,
+  error: Schema5.optional(Schema5.String),
+  handled: Schema5.optional(Schema5.Finite).annotate({ description: "Prompts answered automatically" })
 }).annotate({ identifier: "ScheduleRun" });
-var Task = Schema4.Struct({
-  id: Schema4.String,
-  name: Schema4.String,
-  prompt: Schema4.String,
-  directory: Schema4.String,
+var Task = Schema5.Struct({
+  id: Schema5.String,
+  name: Schema5.String,
+  prompt: Schema5.String,
+  directory: Schema5.String,
   trigger: Trigger,
-  enabled: Schema4.Boolean,
-  agent: Schema4.optional(Schema4.String),
-  model: Schema4.optional(ModelChoice),
+  enabled: Schema5.Boolean,
+  agent: Schema5.optional(Schema5.String),
+  model: Schema5.optional(ModelChoice),
   permission: PermissionMode,
-  catchUp: Schema4.Boolean,
-  notify: Schema4.Boolean,
-  timeoutMinutes: Schema4.Finite,
-  created: Schema4.Finite,
-  updated: Schema4.Finite,
-  nextRun: Schema4.NullOr(Schema4.Finite),
-  lastRun: Schema4.optional(Run)
+  catchUp: Schema5.Boolean,
+  notify: Schema5.Boolean,
+  timeoutMinutes: Schema5.Finite,
+  created: Schema5.Finite,
+  updated: Schema5.Finite,
+  nextRun: Schema5.NullOr(Schema5.Finite),
+  lastRun: Schema5.optional(Run)
 }).annotate({ identifier: "ScheduleTask" });
 var MINUTE = 60000;
 var DAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -6431,41 +7927,64 @@ function describe(trigger) {
 }
 
 // src/server/rpc.ts
-var portable = (schema) => Schema5.toStandardSchemaV1(schema);
-var optional = Schema5.optional;
-var errors = { failed: portable(Schema5.Struct({})) };
-var ConfigSnapshot = Schema5.Struct({
-  path: Schema5.String,
-  exists: Schema5.Boolean,
-  values: Schema5.Record(Schema5.String, Schema5.Unknown)
+var portable = (schema) => Schema6.toStandardSchemaV1(schema);
+var optional = Schema6.optional;
+var errors = { failed: portable(Schema6.Struct({})) };
+var ConfigSnapshot = Schema6.Struct({
+  path: Schema6.String,
+  exists: Schema6.Boolean,
+  values: Schema6.Record(Schema6.String, Schema6.Unknown)
 }).annotate({ identifier: "Mod.ConfigSnapshot" });
-var segment = Schema5.String.check(Schema5.isMinLength(1), Schema5.isMaxLength(256));
-var ConfigWrite = Schema5.Struct({
-  path: Schema5.Array(segment).check(Schema5.isMinLength(1)).annotate({
+var segment = Schema6.String.check(Schema6.isMinLength(1), Schema6.isMaxLength(256));
+var ConfigWrite = Schema6.Struct({
+  path: Schema6.Array(segment).check(Schema6.isMinLength(1)).annotate({
     description: "Where to write, from a top-level key such as agents, commands, permissions or mcp."
   }),
-  value: optional(Schema5.Unknown).annotate({ description: "The new value; omitted to remove the entry." })
+  value: optional(Schema6.Unknown).annotate({ description: "The new value; omitted to remove the entry." })
 });
-var Aurora = Schema5.Struct({
-  enabled: Schema5.Boolean,
-  color: optional(Schema5.String.check(Schema5.isPattern(/^#[0-9a-fA-F]{6}$/u))),
-  background: Schema5.Boolean
+var Aurora = Schema6.Struct({
+  enabled: Schema6.Boolean,
+  color: optional(Schema6.String.check(Schema6.isPattern(/^#[0-9a-fA-F]{6}$/u))),
+  background: Schema6.Boolean
 });
-var Settings = Schema5.Struct({
-  computerUse: Schema5.Boolean,
-  stayInTray: Schema5.Boolean,
-  openAtLogin: Schema5.Boolean,
-  computerSupported: Schema5.Boolean,
-  aurora: Aurora
+var CodeIndexSettings = Schema6.Struct({
+  enabled: Schema6.Boolean,
+  embeddings: Schema6.Struct({
+    enabled: Schema6.Boolean,
+    baseURL: Schema6.String,
+    apiKey: Schema6.String,
+    model: Schema6.String
+  })
+});
+var CodeIndexStatus = Schema6.Struct({
+  root: Schema6.String,
+  files: Schema6.Number,
+  chunks: Schema6.Number,
+  symbols: Schema6.Number,
+  building: Schema6.Boolean,
+  done: Schema6.Number,
+  total: Schema6.Number,
+  built: optional(Schema6.Number),
+  error: optional(Schema6.String),
+  embeddings: optional(Schema6.Struct({ model: Schema6.String, embedded: Schema6.Number, running: Schema6.Boolean, error: optional(Schema6.String) }))
+});
+var Settings = Schema6.Struct({
+  computerUse: Schema6.Boolean,
+  stayInTray: Schema6.Boolean,
+  openAtLogin: Schema6.Boolean,
+  computerSupported: Schema6.Boolean,
+  aurora: Aurora,
+  codeIndex: CodeIndexSettings
 }).annotate({ identifier: "Mod.Settings" });
-var SettingsWrite = Schema5.Struct({
-  computerUse: optional(Schema5.Boolean),
-  stayInTray: optional(Schema5.Boolean),
-  openAtLogin: optional(Schema5.Boolean),
-  aurora: optional(Aurora)
+var SettingsWrite = Schema6.Struct({
+  computerUse: optional(Schema6.Boolean),
+  stayInTray: optional(Schema6.Boolean),
+  openAtLogin: optional(Schema6.Boolean),
+  aurora: optional(Aurora),
+  codeIndex: optional(CodeIndexSettings)
 });
-var TaskID = Schema5.Struct({ id: Schema5.String });
-var HookEvent = Schema5.Literals([
+var TaskID = Schema6.Struct({ id: Schema6.String });
+var HookEvent = Schema6.Literals([
   "PreToolUse",
   "PostToolUse",
   "UserPromptSubmit",
@@ -6473,112 +7992,170 @@ var HookEvent = Schema5.Literals([
   "PermissionAsked",
   "SessionError"
 ]);
-var Hook = Schema5.Struct({
-  id: optional(Schema5.String),
-  name: Schema5.String,
+var Hook = Schema6.Struct({
+  id: optional(Schema6.String),
+  name: Schema6.String,
   event: HookEvent,
-  matcher: optional(Schema5.String),
-  command: Schema5.String,
-  timeout: optional(Schema5.Number),
-  enabled: Schema5.Boolean
+  matcher: optional(Schema6.String),
+  command: Schema6.String,
+  timeout: optional(Schema6.Number),
+  enabled: Schema6.Boolean
 }).annotate({ identifier: "Mod.Hook" });
-var HookResult = Schema5.Struct({ code: Schema5.Number, stdout: Schema5.String, stderr: Schema5.String });
-var MemoryEntry = Schema5.Struct({
-  id: Schema5.String,
-  scope: Schema5.Literals(["global", "project"]),
-  project: optional(Schema5.String),
-  text: Schema5.String,
-  created: Schema5.Number,
-  updated: Schema5.Number
+var HookResult = Schema6.Struct({ code: Schema6.Number, stdout: Schema6.String, stderr: Schema6.String });
+var MemoryEntry = Schema6.Struct({
+  id: Schema6.String,
+  scope: Schema6.Literals(["global", "project"]),
+  project: optional(Schema6.String),
+  text: Schema6.String,
+  created: Schema6.Number,
+  updated: Schema6.Number
 }).annotate({ identifier: "Mod.MemoryEntry" });
-var Memory = Schema5.Struct({ enabled: Schema5.Boolean, entries: Schema5.Array(MemoryEntry) });
-var SavedPrompt = Schema5.Struct({
-  id: Schema5.String,
-  name: Schema5.String,
-  content: Schema5.String,
-  updated: Schema5.Number
+var Memory = Schema6.Struct({ enabled: Schema6.Boolean, entries: Schema6.Array(MemoryEntry) });
+var SavedPrompt = Schema6.Struct({
+  id: Schema6.String,
+  name: Schema6.String,
+  content: Schema6.String,
+  updated: Schema6.Number
 });
-var FetchModels = Schema5.Struct({
-  baseURL: Schema5.String.check(Schema5.isMinLength(1)),
-  provider: optional(Schema5.String),
-  apiKey: optional(Schema5.String),
-  headers: optional(Schema5.Record(Schema5.String, Schema5.String))
+var FetchModels = Schema6.Struct({
+  baseURL: Schema6.String.check(Schema6.isMinLength(1)),
+  provider: optional(Schema6.String),
+  apiKey: optional(Schema6.String),
+  headers: optional(Schema6.Record(Schema6.String, Schema6.String))
 });
-var FetchedModel = Schema5.Struct({ id: Schema5.String, name: optional(Schema5.String) });
+var FetchedModel = Schema6.Struct({ id: Schema6.String, name: optional(Schema6.String) });
 var Definition = Rpc.define({
   id: "opencode-mod",
   methods: {
-    "config.read": { input: portable(Schema5.Struct({})), output: portable(ConfigSnapshot), errors },
+    "config.read": { input: portable(Schema6.Struct({})), output: portable(ConfigSnapshot), errors },
     "config.write": { input: portable(ConfigWrite), output: portable(ConfigSnapshot), errors },
-    "settings.read": { input: portable(Schema5.Struct({})), output: portable(Settings), errors },
+    "settings.read": { input: portable(Schema6.Struct({})), output: portable(Settings), errors },
     "settings.write": { input: portable(SettingsWrite), output: portable(Settings), errors },
-    "schedule.list": { input: portable(Schema5.Struct({})), output: portable(Schema5.Array(Task)), errors },
+    "schedule.list": { input: portable(Schema6.Struct({})), output: portable(Schema6.Array(Task)), errors },
     "schedule.runs": {
-      input: portable(Schema5.Struct({ taskID: optional(Schema5.String) })),
-      output: portable(Schema5.Array(Run)),
+      input: portable(Schema6.Struct({ taskID: optional(Schema6.String) })),
+      output: portable(Schema6.Array(Run)),
       errors
     },
     "schedule.create": { input: portable(TaskInput), output: portable(Task), errors },
     "schedule.update": {
-      input: portable(Schema5.Struct({ id: Schema5.String, patch: TaskPatch })),
+      input: portable(Schema6.Struct({ id: Schema6.String, patch: TaskPatch })),
       output: portable(Task),
       errors
     },
-    "schedule.remove": { input: portable(TaskID), output: portable(Schema5.Void), errors },
-    "schedule.run": { input: portable(TaskID), output: portable(Schema5.Void), errors },
-    "schedule.stop": { input: portable(TaskID), output: portable(Schema5.Void), errors },
-    "hooks.list": { input: portable(Schema5.Struct({})), output: portable(Schema5.Array(Hook)), errors },
+    "schedule.remove": { input: portable(TaskID), output: portable(Schema6.Void), errors },
+    "schedule.run": { input: portable(TaskID), output: portable(Schema6.Void), errors },
+    "schedule.stop": { input: portable(TaskID), output: portable(Schema6.Void), errors },
+    "hooks.list": { input: portable(Schema6.Struct({})), output: portable(Schema6.Array(Hook)), errors },
     "hooks.save": {
-      input: portable(Schema5.Struct({ hooks: Schema5.Array(Hook) })),
-      output: portable(Schema5.Array(Hook)),
+      input: portable(Schema6.Struct({ hooks: Schema6.Array(Hook) })),
+      output: portable(Schema6.Array(Hook)),
       errors
     },
     "hooks.test": {
-      input: portable(Schema5.Struct({ command: Schema5.String, event: HookEvent })),
+      input: portable(Schema6.Struct({ command: Schema6.String, event: HookEvent })),
       output: portable(HookResult),
       errors
     },
-    "memory.read": { input: portable(Schema5.Struct({})), output: portable(Memory), errors },
+    "memory.read": { input: portable(Schema6.Struct({})), output: portable(Memory), errors },
     "memory.save": {
-      input: portable(Schema5.Struct({
-        id: optional(Schema5.String),
-        text: Schema5.String,
-        scope: Schema5.Literals(["global", "project"]),
-        project: optional(Schema5.String)
+      input: portable(Schema6.Struct({
+        id: optional(Schema6.String),
+        text: Schema6.String,
+        scope: Schema6.Literals(["global", "project"]),
+        project: optional(Schema6.String)
       })),
       output: portable(MemoryEntry),
       errors
     },
-    "memory.remove": { input: portable(TaskID), output: portable(Schema5.Void), errors },
+    "memory.remove": { input: portable(TaskID), output: portable(Schema6.Void), errors },
     "memory.enable": {
-      input: portable(Schema5.Struct({ enabled: Schema5.Boolean })),
-      output: portable(Schema5.Void),
+      input: portable(Schema6.Struct({ enabled: Schema6.Boolean })),
+      output: portable(Schema6.Void),
       errors
     },
     "prompts.upstream": {
-      input: portable(Schema5.Struct({})),
-      output: portable(Schema5.Record(Schema5.String, Schema5.String)),
+      input: portable(Schema6.Struct({})),
+      output: portable(Schema6.Record(Schema6.String, Schema6.String)),
       errors
     },
-    "prompts.library": { input: portable(Schema5.Struct({})), output: portable(Schema5.Array(SavedPrompt)), errors },
+    "prompts.library": { input: portable(Schema6.Struct({})), output: portable(Schema6.Array(SavedPrompt)), errors },
     "prompts.keep": {
-      input: portable(Schema5.Struct({ id: optional(Schema5.String), name: Schema5.String, content: Schema5.String })),
+      input: portable(Schema6.Struct({ id: optional(Schema6.String), name: Schema6.String, content: Schema6.String })),
       output: portable(SavedPrompt),
       errors
     },
-    "prompts.drop": { input: portable(TaskID), output: portable(Schema5.Void), errors },
-    "providers.models": { input: portable(FetchModels), output: portable(Schema5.Array(FetchedModel)), errors }
+    "prompts.drop": { input: portable(TaskID), output: portable(Schema6.Void), errors },
+    "providers.models": { input: portable(FetchModels), output: portable(Schema6.Array(FetchedModel)), errors },
+    "codeindex.status": {
+      input: portable(Schema6.Struct({})),
+      output: portable(Schema6.Struct({ current: Schema6.String, indexes: Schema6.Array(CodeIndexStatus) })),
+      errors
+    },
+    "codeindex.rebuild": { input: portable(Schema6.Struct({ root: Schema6.String })), output: portable(Schema6.Void), errors }
   },
   events: {}
 });
 
 // src/server/settings.ts
-import { mkdir as mkdir8, readFile as readFile9, rename as rename5, writeFile as writeFile8 } from "fs/promises";
-import path11 from "path";
-var DEFAULTS = { computerUse: false, stayInTray: true, openAtLogin: false, autoUpdate: true };
-var file6 = () => path11.join(Path.config, "opencode-mod.json");
+import { mkdir as mkdir8, readFile as readFile12, rename as rename5, writeFile as writeFile8 } from "fs/promises";
+import path16 from "path";
+var DEFAULTS = {
+  computerUse: false,
+  stayInTray: true,
+  openAtLogin: false,
+  autoUpdate: true,
+  codeIndex: {
+    enabled: true,
+    embeddings: { enabled: false, baseURL: "http://localhost:11434/v1", apiKey: "", model: "nomic-embed-text" }
+  },
+  voice: {
+    enabled: false,
+    shortcut: "CommandOrControl+Shift+Space",
+    baseURL: "https://api.groq.com/openai/v1",
+    apiKey: "",
+    model: "whisper-large-v3-turbo",
+    language: "",
+    autoSend: false,
+    speakReplies: false,
+    rate: 1
+  }
+};
+var file6 = () => path16.join(Path.config, "opencode-mod.json");
+var object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+var string = (value, fallback) => typeof value === "string" ? value : fallback;
+function codeIndex(input) {
+  const value = object(input);
+  const embeddings = object(value.embeddings);
+  const base = DEFAULTS.codeIndex.embeddings;
+  return {
+    enabled: value.enabled !== false,
+    embeddings: {
+      enabled: embeddings.enabled === true,
+      baseURL: string(embeddings.baseURL, base.baseURL),
+      apiKey: string(embeddings.apiKey, base.apiKey),
+      model: string(embeddings.model, base.model)
+    }
+  };
+}
+function voice(input) {
+  const value = object(input);
+  const base = DEFAULTS.voice;
+  const rate = typeof value.rate === "number" && value.rate >= 0.5 && value.rate <= 2 ? value.rate : base.rate;
+  return {
+    enabled: value.enabled === true,
+    shortcut: string(value.shortcut, base.shortcut) || base.shortcut,
+    baseURL: string(value.baseURL, base.baseURL),
+    apiKey: string(value.apiKey, base.apiKey),
+    model: string(value.model, base.model),
+    language: string(value.language, base.language),
+    autoSend: value.autoSend === true,
+    speakReplies: value.speakReplies === true,
+    rate
+  };
+}
 async function load3(target = file6()) {
-  const parsed = await readFile9(target, "utf8").then((text) => JSON.parse(text)).catch(() => {
+  const parsed = await readFile12(target, "utf8").then((text) => JSON.parse(text)).catch(() => {
     return;
   });
   if (!parsed || typeof parsed !== "object")
@@ -6588,12 +8165,20 @@ async function load3(target = file6()) {
     computerUse: value.computerUse === true,
     stayInTray: value.stayInTray !== false,
     openAtLogin: value.openAtLogin === true,
-    autoUpdate: value.autoUpdate !== false
+    autoUpdate: value.autoUpdate !== false,
+    codeIndex: codeIndex(value.codeIndex),
+    voice: voice(value.voice)
   };
 }
 async function save4(input, target = file6()) {
-  const next = { ...await load3(target), ...input };
-  await mkdir8(path11.dirname(target), { recursive: true });
+  const current = await load3(target);
+  const next = {
+    ...current,
+    ...input,
+    codeIndex: codeIndex(input.codeIndex ?? current.codeIndex),
+    voice: voice(input.voice ?? current.voice)
+  };
+  await mkdir8(path16.dirname(target), { recursive: true });
   const temp = `${target}.${process.pid}.tmp`;
   await writeFile8(temp, JSON.stringify(next, null, 2) + `
 `);
@@ -6601,10 +8186,10 @@ async function save4(input, target = file6()) {
   return next;
 }
 // src/server/schedule/plugin.ts
-import { Effect as Effect5, Schema as Schema6 } from "effect";
+import { Effect as Effect6, Schema as Schema7 } from "effect";
 
 // src/server/schedule/description.txt
-var description_default2 = `Creates and manages scheduled tasks: prompts that OpenCode runs on its own at set times, each in a new session in the task's project folder. Tasks run while OpenCode is running (the desktop app keeps running in the tray when its window is closed).
+var description_default3 = `Creates and manages scheduled tasks: prompts that OpenCode runs on its own at set times, each in a new session in the task's project folder. Tasks run while OpenCode is running (the desktop app keeps running in the tray when its window is closed).
 
 Use it when the user asks for something to happen later or repeatedly ("every morning at 9", "each Monday", "on the 1st of every month", "every 30 minutes", "tomorrow at 6pm").
 
@@ -6629,11 +8214,11 @@ Write the prompt so it stands alone: the run starts a fresh session with no memo
 
 // src/server/schedule/store.ts
 import { EventEmitter } from "events";
-import { mkdir as mkdir9, readFile as readFile10, rename as rename6, stat as stat2, writeFile as writeFile9 } from "fs/promises";
-import path12 from "path";
+import { mkdir as mkdir9, readFile as readFile13, rename as rename6, stat as stat3, writeFile as writeFile9 } from "fs/promises";
+import path17 from "path";
 import { randomUUID as randomUUID4 } from "crypto";
 var DEFAULTS2 = { enabled: true, permission: "ask", catchUp: false, notify: true, timeoutMinutes: 60 };
-var file7 = () => path12.join(Path.data, "schedules.json");
+var file7 = () => path17.join(Path.data, "schedules.json");
 var changes = new EventEmitter;
 var queue2 = Promise.resolve();
 function locked2(fn) {
@@ -6644,7 +8229,7 @@ function locked2(fn) {
 }
 async function load4() {
   try {
-    const parsed = JSON.parse(await readFile10(file7(), "utf8"));
+    const parsed = JSON.parse(await readFile13(file7(), "utf8"));
     return {
       version: 1,
       tasks: parsed.tasks ?? [],
@@ -6657,7 +8242,7 @@ async function load4() {
   }
 }
 async function save5(data) {
-  await mkdir9(path12.dirname(file7()), { recursive: true });
+  await mkdir9(path17.dirname(file7()), { recursive: true });
   const temp = `${file7()}.${process.pid}.tmp`;
   await writeFile9(temp, JSON.stringify(data, null, 2));
   await rename6(temp, file7());
@@ -6676,7 +8261,7 @@ function withLastRun(data, task) {
   return lastRun ? { ...task, lastRun } : task;
 }
 async function checkDirectory(directory) {
-  const info = await stat2(directory).catch(() => {
+  const info = await stat3(directory).catch(() => {
     return;
   });
   if (!info?.isDirectory())
@@ -6693,11 +8278,11 @@ function clean(input) {
     throw new Error("Timeout must be between 1 minute and 24 hours");
   return { ...input, ...name !== undefined && { name }, ...prompt !== undefined && { prompt } };
 }
-async function list2() {
+async function list3() {
   const data = await load4();
   return data.tasks.map((task) => withLastRun(data, task));
 }
-async function get(id) {
+async function get2(id) {
   const data = await load4();
   const task = data.tasks.find((item) => item.id === id);
   return task ? withLastRun(data, task) : undefined;
@@ -6713,7 +8298,7 @@ async function create(input) {
       ...values,
       name: values.name,
       prompt: values.prompt,
-      directory: path12.resolve(input.directory),
+      directory: path17.resolve(input.directory),
       trigger: input.trigger,
       id: randomUUID4(),
       created: now,
@@ -6738,7 +8323,7 @@ async function update(id, patch) {
     const next2 = {
       ...current,
       ...values,
-      ...patch.directory && { directory: path12.resolve(patch.directory) },
+      ...patch.directory && { directory: path17.resolve(patch.directory) },
       updated: Date.now()
     };
     if (patch.trigger || patch.enabled && !current.enabled || next2.nextRun === null)
@@ -6782,25 +8367,25 @@ async function requestStop(id) {
 var METADATA_KEY = "modSchedule";
 // src/server/schedule/plugin.ts
 var DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-var Parameters3 = Schema6.Struct({
-  action: Schema6.Literals(["list", "create", "update", "delete", "run", "runs"]),
-  id: Schema6.optional(Schema6.String).annotate({ description: "Task id, for update, delete, run and runs" }),
-  name: Schema6.optional(Schema6.String),
-  prompt: Schema6.optional(Schema6.String).annotate({ description: "What the agent should do on each run" }),
-  directory: Schema6.optional(Schema6.String).annotate({ description: "Project folder; defaults to the current one" }),
-  kind: Schema6.optional(Schema6.Literals(["once", "interval", "daily", "weekly", "monthly", "cron"])),
-  at: Schema6.optional(Schema6.String).annotate({ description: "once: local date and time, e.g. 2026-10-17T09:00" }),
-  time: Schema6.optional(Schema6.String).annotate({ description: "daily/weekly/monthly: 24-hour HH:MM" }),
-  days: Schema6.optional(Schema6.Array(Schema6.String)).annotate({ description: 'weekly: e.g. ["mon", "thu"]' }),
-  day: Schema6.optional(Schema6.Number).annotate({ description: "monthly: day of month 1-31 (clamped to month end)" }),
-  minutes: Schema6.optional(Schema6.Number).annotate({ description: "interval: run every N minutes" }),
-  cron: Schema6.optional(Schema6.String).annotate({ description: "cron: 5-field expression in local time" }),
-  enabled: Schema6.optional(Schema6.Boolean),
-  permission: Schema6.optional(Schema6.Literals(["ask", "deny", "allow"])).annotate({
+var Parameters4 = Schema7.Struct({
+  action: Schema7.Literals(["list", "create", "update", "delete", "run", "runs"]),
+  id: Schema7.optional(Schema7.String).annotate({ description: "Task id, for update, delete, run and runs" }),
+  name: Schema7.optional(Schema7.String),
+  prompt: Schema7.optional(Schema7.String).annotate({ description: "What the agent should do on each run" }),
+  directory: Schema7.optional(Schema7.String).annotate({ description: "Project folder; defaults to the current one" }),
+  kind: Schema7.optional(Schema7.Literals(["once", "interval", "daily", "weekly", "monthly", "cron"])),
+  at: Schema7.optional(Schema7.String).annotate({ description: "once: local date and time, e.g. 2026-10-17T09:00" }),
+  time: Schema7.optional(Schema7.String).annotate({ description: "daily/weekly/monthly: 24-hour HH:MM" }),
+  days: Schema7.optional(Schema7.Array(Schema7.String)).annotate({ description: 'weekly: e.g. ["mon", "thu"]' }),
+  day: Schema7.optional(Schema7.Number).annotate({ description: "monthly: day of month 1-31 (clamped to month end)" }),
+  minutes: Schema7.optional(Schema7.Number).annotate({ description: "interval: run every N minutes" }),
+  cron: Schema7.optional(Schema7.String).annotate({ description: "cron: 5-field expression in local time" }),
+  enabled: Schema7.optional(Schema7.Boolean),
+  permission: Schema7.optional(Schema7.Literals(["ask", "deny", "allow"])).annotate({
     description: "Unattended approvals: ask waits for the user (default), deny skips them, allow approves them"
   }),
-  catch_up: Schema6.optional(Schema6.Boolean).annotate({ description: "Run once at startup after a missed run" }),
-  timeout_minutes: Schema6.optional(Schema6.Number)
+  catch_up: Schema7.optional(Schema7.Boolean).annotate({ description: "Run once at startup after a missed run" }),
+  timeout_minutes: Schema7.optional(Schema7.Number)
 });
 function trigger(params) {
   if (!params.kind)
@@ -6853,14 +8438,14 @@ async function run3(params, directory, confirm) {
   const task = async () => {
     if (!params.id)
       throw new Error(`${params.action} needs the task id (use action "list")`);
-    const found = await get(params.id);
+    const found = await get2(params.id);
     if (!found)
       throw new Error(`No task with id ${params.id}`);
     return found;
   };
   switch (params.action) {
     case "list": {
-      const tasks = await list2();
+      const tasks = await list3();
       return tasks.map(line2).join(`
 `) || "No scheduled tasks.";
     }
@@ -6910,8 +8495,8 @@ ${line2(updated)}`;
     }
   }
 }
-var message2 = (error) => error instanceof Error ? error.message : String(error);
-var modeOf = (ctx, cache) => Effect5.fnUntraced(function* (sessionID) {
+var message3 = (error) => error instanceof Error ? error.message : String(error);
+var modeOf = (ctx, cache) => Effect6.fnUntraced(function* (sessionID) {
   const seen = [];
   let current = sessionID;
   let found = null;
@@ -6922,7 +8507,7 @@ var modeOf = (ctx, cache) => Effect5.fnUntraced(function* (sessionID) {
       break;
     }
     seen.push(current);
-    const session = yield* ctx.session.get({ sessionID: current }).pipe(Effect5.orElseSucceed(() => {
+    const session = yield* ctx.session.get({ sessionID: current }).pipe(Effect6.orElseSucceed(() => {
       return;
     }));
     if (!session)
@@ -6939,15 +8524,15 @@ var modeOf = (ctx, cache) => Effect5.fnUntraced(function* (sessionID) {
     cache.set(id, found);
   return found;
 });
-var register4 = Effect5.fn("SchedulePlugin.register")(function* (ctx) {
+var register5 = Effect6.fn("SchedulePlugin.register")(function* (ctx) {
   yield* ctx.tool.transform((editor) => {
     editor.add({
       name: "schedule",
-      description: description_default2,
-      input: Parameters3,
+      description: description_default3,
+      input: Parameters4,
       options: { permission: "schedule", codemode: false },
-      execute: (input, tool) => Effect5.gen(function* () {
-        const confirm = (name) => Effect5.runPromise(ctx.permission.assert({
+      execute: (input, tool) => Effect6.gen(function* () {
+        const confirm = (name) => Effect6.runPromise(ctx.permission.assert({
           sessionID: tool.sessionID,
           agent: tool.agent,
           action: "schedule",
@@ -6955,17 +8540,17 @@ var register4 = Effect5.fn("SchedulePlugin.register")(function* (ctx) {
           save: ["*"],
           metadata: { action: input.action, name }
         }));
-        const text = yield* Effect5.tryPromise({
+        const text = yield* Effect6.tryPromise({
           try: () => run3(input, ctx.location.directory, confirm),
-          catch: (error) => new Error2({ message: message2(error), error })
+          catch: (error) => new Error2({ message: message3(error), error })
         });
         return { content: text, metadata: { title: `schedule ${input.action}` } };
       })
     });
-  }).pipe(Effect5.orDie);
+  }).pipe(Effect6.orDie);
   const cache = new Map;
   const lookup = modeOf(ctx, cache);
-  yield* ctx.permission.hook("evaluate", (event) => Effect5.gen(function* () {
+  yield* ctx.permission.hook("evaluate", (event) => Effect6.gen(function* () {
     if (event.effect !== "ask")
       return;
     const mode = yield* lookup(event.sessionID);
@@ -6981,16 +8566,17 @@ var register4 = Effect5.fn("SchedulePlugin.register")(function* (ctx) {
 });
 
 // src/server/index.ts
-var message3 = (error) => error instanceof Error ? error.message : String(error);
-var attempt = (call, fn) => Effect6.tryPromise({ try: fn, catch: (error) => call.error("failed", message3(error), {}) });
+var message4 = (error) => error instanceof Error ? error.message : String(error);
+var attempt = (call, fn) => Effect7.tryPromise({ try: fn, catch: (error) => call.error("failed", message4(error), {}) });
 var server_default = Plugin.define({
   id: "opencode-mod",
-  effect: (ctx) => Effect6.gen(function* () {
-    let settings = yield* Effect6.promise(() => load3());
+  effect: (ctx) => Effect7.gen(function* () {
+    let settings = yield* Effect7.promise(() => load3());
     yield* register(ctx, () => settings.computerUse);
-    yield* register4(ctx);
-    yield* register2(ctx);
+    yield* register5(ctx);
     yield* register3(ctx);
+    yield* register4(ctx);
+    yield* register2(ctx, () => settings.codeIndex);
     const snapshot = async () => {
       const aurora = await load();
       const saved = await load3();
@@ -7003,28 +8589,29 @@ var server_default = Plugin.define({
           enabled: aurora.enabled,
           background: aurora.background,
           ...aurora.color ? { color: aurora.color } : {}
-        }
+        },
+        codeIndex: saved.codeIndex
       };
     };
     yield* ctx.rpc.register(Definition, {
-      "config.read": (_, call) => Effect6.tryPromise({
-        try: () => read(),
-        catch: (error) => call.error("failed", message3(error), {})
+      "config.read": (_, call) => Effect7.tryPromise({
+        try: () => read2(),
+        catch: (error) => call.error("failed", message4(error), {})
       }),
-      "config.write": (input, call) => Effect6.tryPromise({
+      "config.write": (input, call) => Effect7.tryPromise({
         try: () => write(input.path, input.value),
-        catch: (error) => call.error("failed", message3(error), {})
+        catch: (error) => call.error("failed", message4(error), {})
       }),
-      "settings.read": (_, call) => Effect6.tryPromise({ try: snapshot, catch: (error) => call.error("failed", message3(error), {}) }),
-      "settings.write": (input, call) => Effect6.gen(function* () {
-        const fail = (error) => call.error("failed", message3(error), {});
+      "settings.read": (_, call) => Effect7.tryPromise({ try: snapshot, catch: (error) => call.error("failed", message4(error), {}) }),
+      "settings.write": (input, call) => Effect7.gen(function* () {
+        const fail = (error) => call.error("failed", message4(error), {});
         if (input.aurora) {
           const aurora = input.aurora;
-          yield* Effect6.tryPromise({ try: () => save(aurora), catch: fail });
+          yield* Effect7.tryPromise({ try: () => save(aurora), catch: fail });
         }
         if (input.computerUse !== undefined && input.computerUse !== settings.computerUse) {
           const computerUse = input.computerUse;
-          settings = yield* Effect6.tryPromise({ try: () => save4({ computerUse }), catch: fail });
+          settings = yield* Effect7.tryPromise({ try: () => save4({ computerUse }), catch: fail });
           if (!computerUse)
             stop();
           yield* ctx.tool.reload();
@@ -7034,11 +8621,21 @@ var server_default = Plugin.define({
             ...input.stayInTray !== undefined ? { stayInTray: input.stayInTray } : {},
             ...input.openAtLogin !== undefined ? { openAtLogin: input.openAtLogin } : {}
           };
-          yield* Effect6.tryPromise({ try: () => save4(desktop), catch: fail });
+          yield* Effect7.tryPromise({ try: () => save4(desktop), catch: fail });
         }
-        return yield* Effect6.tryPromise({ try: snapshot, catch: fail });
+        if (input.codeIndex) {
+          const codeIndex = input.codeIndex;
+          const was = settings.codeIndex.enabled;
+          settings = yield* Effect7.tryPromise({ try: () => save4({ codeIndex }), catch: fail });
+          configure(settings.codeIndex);
+          if (settings.codeIndex.enabled && !was)
+            start(ctx.location.directory, settings.codeIndex);
+          if (settings.codeIndex.enabled !== was)
+            yield* ctx.tool.reload();
+        }
+        return yield* Effect7.tryPromise({ try: snapshot, catch: fail });
       }),
-      "schedule.list": (_, call) => attempt(call, () => list2()),
+      "schedule.list": (_, call) => attempt(call, () => list3()),
       "schedule.runs": (input, call) => attempt(call, () => runs(input.taskID)),
       "schedule.create": (input, call) => attempt(call, () => create(input)),
       "schedule.update": (input, call) => attempt(call, () => update(input.id, input.patch)),
@@ -7051,7 +8648,7 @@ var server_default = Plugin.define({
       "schedule.stop": (input, call) => attempt(call, () => requestStop(input.id).then(() => {
         return;
       })),
-      "hooks.list": (_, call) => attempt(call, () => list()),
+      "hooks.list": (_, call) => attempt(call, () => list2()),
       "hooks.save": (input, call) => attempt(call, () => save2([...input.hooks])),
       "hooks.test": (input, call) => attempt(call, () => run2(input.command, { event: input.event, test: true, directory: ctx.location.directory }, {
         cwd: ctx.location.directory,
@@ -7068,8 +8665,19 @@ var server_default = Plugin.define({
       "prompts.library": (_, call) => attempt(call, () => library()),
       "prompts.keep": (input, call) => attempt(call, () => keep2(input)),
       "prompts.drop": (input, call) => attempt(call, () => drop(input.id)),
-      "providers.models": (input, call) => attempt(call, () => fetchModels(input))
-    }).pipe(Effect6.orDie);
+      "providers.models": (input, call) => attempt(call, () => fetchModels(input)),
+      "codeindex.status": (_, call) => attempt(call, async () => ({
+        current: ctx.location.directory,
+        indexes: statuses(settings.codeIndex)
+      })),
+      "codeindex.rebuild": (input, call) => attempt(call, async () => {
+        if (!settings.codeIndex.enabled)
+          throw new Error("The code index is turned off");
+        rebuild(input.root, settings.codeIndex).catch(() => {
+          return;
+        });
+      })
+    }).pipe(Effect7.orDie);
   })
 });
 export {

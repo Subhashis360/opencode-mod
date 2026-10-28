@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { ComputerAurora } from "./computer/aurora.js"
 import { ComputerDriver } from "./computer/driver.js"
 import { ComputerPlugin } from "./computer/plugin.js"
+import { CodeIndexPlugin } from "./codeindex/plugin.js"
 import { ModConfig } from "./config.js"
 import { ModHooks } from "./hooks.js"
 import { ModMemory } from "./memory.js"
@@ -34,6 +35,7 @@ export default Plugin.define({
       yield* SchedulePlugin.register(ctx)
       yield* ModHooks.register(ctx)
       yield* ModMemory.register(ctx)
+      yield* CodeIndexPlugin.register(ctx, () => settings.codeIndex)
 
       const snapshot = async (): Promise<Mod.Settings> => {
         const aurora = await ComputerAurora.load()
@@ -49,6 +51,7 @@ export default Plugin.define({
             background: aurora.background,
             ...(aurora.color ? { color: aurora.color } : {}),
           },
+          codeIndex: saved.codeIndex,
         }
       }
 
@@ -86,6 +89,14 @@ export default Plugin.define({
                 }
                 yield* Effect.tryPromise({ try: () => ModSettings.save(desktop), catch: fail })
               }
+              if (input.codeIndex) {
+                const codeIndex = input.codeIndex
+                const was = settings.codeIndex.enabled
+                settings = yield* Effect.tryPromise({ try: () => ModSettings.save({ codeIndex }), catch: fail })
+                CodeIndexPlugin.configure(settings.codeIndex)
+                if (settings.codeIndex.enabled && !was) CodeIndexPlugin.start(ctx.location.directory, settings.codeIndex)
+                if (settings.codeIndex.enabled !== was) yield* ctx.tool.reload()
+              }
               return yield* Effect.tryPromise({ try: snapshot, catch: fail })
             }),
           "schedule.list": (_, call) => attempt(call, () => ScheduleStore.list()),
@@ -120,6 +131,17 @@ export default Plugin.define({
           "prompts.keep": (input, call) => attempt(call, () => ModPrompts.keep(input)),
           "prompts.drop": (input, call) => attempt(call, () => ModPrompts.drop(input.id)),
           "providers.models": (input, call) => attempt(call, () => ModProviders.fetchModels(input)),
+          "codeindex.status": (_, call) =>
+            attempt(call, async () => ({
+              current: ctx.location.directory,
+              indexes: CodeIndexPlugin.statuses(settings.codeIndex),
+            })),
+          "codeindex.rebuild": (input, call) =>
+            attempt(call, async () => {
+              if (!settings.codeIndex.enabled) throw new Error("The code index is turned off")
+              // Runs in the background; the status shows its progress.
+              void CodeIndexPlugin.rebuild(input.root, settings.codeIndex).catch(() => undefined)
+            }),
         })
         .pipe(Effect.orDie)
     }),

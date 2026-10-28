@@ -1,0 +1,11 @@
+Searches this project's code index: a local index of every source file, its declarations (functions, classes, methods, types), its imports and its code chunks, kept current as files change. Use it before grep or glob to find where something is: it answers in one call with file:line references you can open with the read tool, instead of many searches and reads.
+
+Actions:
+- search: find code by what it does or by a name. query is plain language ("where are auth tokens refreshed", "retry with backoff") or an identifier. Returns the best matching code chunks with line numbers. Set full=true to see whole chunks.
+- symbols: find declarations by name, exact or partial (query "UserServ" finds UserService). Optional kind: function, method, class, interface, type, enum, struct, trait, module, variable, macro.
+- references: everything that uses one identifier (symbol): its definitions, calls, imports and other uses, each with the function or class it sits in. Use it for "who calls X" and before renaming or changing a signature.
+- outline: the declarations of one file (file), as a tree with line ranges. Cheaper than reading the whole file.
+- dependencies: what one file (file) imports and which project files import it.
+- status: how many files the index holds and whether it is updating.
+
+path narrows search, symbols and references to files whose path contains it (e.g. "src/server"). Paths are relative to the project folder. The index matches words and names, not exact text: use grep for an exact string or a regular expression.

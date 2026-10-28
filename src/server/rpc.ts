@@ -37,6 +37,34 @@ const Aurora = Schema.Struct({
   background: Schema.Boolean,
 })
 
+export const CodeIndexSettings = Schema.Struct({
+  enabled: Schema.Boolean,
+  embeddings: Schema.Struct({
+    enabled: Schema.Boolean,
+    baseURL: Schema.String,
+    apiKey: Schema.String,
+    model: Schema.String,
+  }),
+})
+export type CodeIndexSettings = typeof CodeIndexSettings.Type
+
+/** One project folder's index, as the server part holds it now. */
+export const CodeIndexStatus = Schema.Struct({
+  root: Schema.String,
+  files: Schema.Number,
+  chunks: Schema.Number,
+  symbols: Schema.Number,
+  building: Schema.Boolean,
+  done: Schema.Number,
+  total: Schema.Number,
+  built: optional(Schema.Number),
+  error: optional(Schema.String),
+  embeddings: optional(
+    Schema.Struct({ model: Schema.String, embedded: Schema.Number, running: Schema.Boolean, error: optional(Schema.String) }),
+  ),
+})
+export type CodeIndexStatus = typeof CodeIndexStatus.Type
+
 /** The mod's own settings, with what this machine supports. */
 export const Settings = Schema.Struct({
   computerUse: Schema.Boolean,
@@ -45,6 +73,7 @@ export const Settings = Schema.Struct({
   /** Computer use can run here: Windows, where the desktop helper works. */
   computerSupported: Schema.Boolean,
   aurora: Aurora,
+  codeIndex: CodeIndexSettings,
 }).annotate({ identifier: "Mod.Settings" })
 export type Settings = typeof Settings.Type
 
@@ -53,6 +82,7 @@ export const SettingsWrite = Schema.Struct({
   stayInTray: optional(Schema.Boolean),
   openAtLogin: optional(Schema.Boolean),
   aurora: optional(Aurora),
+  codeIndex: optional(CodeIndexSettings),
 })
 
 const TaskID = Schema.Struct({ id: Schema.String })
@@ -175,6 +205,12 @@ export const Definition = Rpc.define({
     },
     "prompts.drop": { input: portable(TaskID), output: portable(Schema.Void), errors },
     "providers.models": { input: portable(FetchModels), output: portable(Schema.Array(FetchedModel)), errors },
+    "codeindex.status": {
+      input: portable(Schema.Struct({})),
+      output: portable(Schema.Struct({ current: Schema.String, indexes: Schema.Array(CodeIndexStatus) })),
+      errors,
+    },
+    "codeindex.rebuild": { input: portable(Schema.Struct({ root: Schema.String })), output: portable(Schema.Void), errors },
   },
   events: {},
 })
