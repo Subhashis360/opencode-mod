@@ -63,6 +63,8 @@ namespace OpencodeComputer {
       if (single) {
         if (target == IntPtr.Zero) throw new Exception("No app window found; open the app first");
         area = Rectangle.Intersect(WindowRect(target), SystemInformation.VirtualScreen);
+        // A drill-down into one group of a busy window maps only that group's area, so the item limit goes to it.
+        if (Int(r, "cw") > 0) area = Rectangle.Intersect(area, new Rectangle(Int(r, "cx"), Int(r, "cy"), Int(r, "cw"), Int(r, "ch")));
         if (area.Width < 2 || area.Height < 2) throw new Exception("The app window is off screen or minimized");
       }
       Settle(area, Int(r, "settle", 0));
@@ -104,6 +106,9 @@ namespace OpencodeComputer {
         { "windows", windows.Take(10).Select(Window).Where(w => w != null).ToArray() },
         { "front", Window(GetForegroundWindow()) }, { "target", target == IntPtr.Zero ? null : Window(target) },
         { "ocr", ocrStatus }, { "ms", (int)clock.ElapsedMilliseconds }, { "settle", (int)settled },
+        { "groups", boxes.GroupBy(b => b.Win + "|" + b.Name + "|" + b.Rect).Select(g => g.First()).Take(400).Select(b => (object)new Dictionary<string, object> {
+          { "win", b.Win.ToInt64() }, { "name", b.Name }, { "x", b.Rect.X }, { "y", b.Rect.Y }, { "w", b.Rect.Width }, { "h", b.Rect.Height },
+        }).ToArray() },
       };
     }
 
@@ -614,7 +619,7 @@ namespace OpencodeComputer {
         return Located(rect, IntPtr.Zero, true);
       }
       if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) return new Dictionary<string, object> { { "found", false }, { "closed", true } };
-      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, name, ox, oy);
+      var element = Refind(hwnd, Str(r, "rid"), name, Str(r, "ctx"), ox, oy, old.Width, old.Height);
       if (element == null) return new Dictionary<string, object> { { "found", false } };
       var shown = Visible(element);
       object pattern;
@@ -707,9 +712,9 @@ namespace OpencodeComputer {
     // focus or typing, and reads the result back.
     static object SetValue(Dictionary<string, object> r) {
       var hwnd = Hwnd(r, "hwnd");
-      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, Str(r, "name") ?? "", Int(r, "x"), Int(r, "y"));
-      if (element == null) throw new Exception("That element is no longer there; look again");
-      if (!element.Current.IsEnabled) throw new Exception("That element is disabled");
+      var element = Refind(r);
+      if (element == null) throw new Exception("STALE_REF: that element is no longer there; look again");
+      if (!element.Current.IsEnabled) throw new Exception("DISABLED: that element is disabled");
       var value = Str(r, "value") ?? "";
       object pattern;
       if (element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) {
@@ -738,17 +743,19 @@ namespace OpencodeComputer {
         if (element.Current.IsPassword) return "(set)";
         return ((ValuePattern)pattern).Current.Value;
       }
-      throw new Exception("This element cannot be set directly; click it and type instead");
+      throw new Exception("UNSUPPORTED: this element cannot be set directly; click it and type instead");
     }
 
     // Puts the keyboard focus in a field through accessibility, so typing can follow without a mouse click.
     static object Focus(Dictionary<string, object> r) {
       var hwnd = Hwnd(r, "hwnd");
-      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, Str(r, "name") ?? "", Int(r, "x"), Int(r, "y"));
-      if (element == null) throw new Exception("That element is no longer there; look again");
-      if (!element.Current.IsEnabled) throw new Exception("That element is disabled");
+      var element = Refind(r);
+      if (element == null) throw new Exception("STALE_REF: that element is no longer there; look again");
+      if (!element.Current.IsEnabled) throw new Exception("DISABLED: that element is disabled");
       Front(hwnd);
       element.SetFocus();
+      var clock = Stopwatch.StartNew();
+      while (!element.Current.HasKeyboardFocus && clock.ElapsedMilliseconds < 300) Thread.Sleep(20);
       return element.Current.HasKeyboardFocus;
     }
 
@@ -921,40 +928,11 @@ namespace OpencodeComputer {
       return null;
     }
 
-    // Brings the best-matching app window to the front: an exact process name first, then a title match.
+    // Brings the best-matching app window to the front. A window that is still opening (just launched, or animating
+    // in) is waited for briefly.
     static object Switch(string query, string skip, HashSet<int> pids) {
-      var wanted = Fold(query);
-      if (wanted.Length == 0) throw new Exception("switch_window needs a window title or app name in text");
-      skip = (skip ?? "").ToLowerInvariant();
-      Func<IntPtr, int> rank = hwnd => {
-        uint pid;
-        GetWindowThreadProcessId(hwnd, out pid);
-        var process = Fold(ProcessName(pid));
-        var title = Fold(TitleOf(hwnd));
-        if (process == wanted) return 0;
-        if (title == wanted) return 1;
-        if (title.StartsWith(wanted)) return 2;
-        if (title.Contains(wanted)) return 3;
-        if (process.Contains(wanted)) return 4;
-        return 9;
-      };
-      // A window that is still opening (just launched, or animating in) is waited for briefly.
-      var best = IntPtr.Zero;
-      var clock = Stopwatch.StartNew();
-      while (true) {
-        var candidates = new List<IntPtr>();
-        EnumWindows((hwnd, data) => {
-          if (IsWindowVisible(hwnd) && GetWindowText(hwnd, new StringBuilder(2), 2) > 0 && (GetWindowLong(hwnd, -20) & 0x80) == 0 && !Own(hwnd, skip, pids)) {
-            int cloaked;
-            if (!(DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0)) candidates.Add(hwnd);
-          }
-          return true;
-        }, IntPtr.Zero);
-        best = candidates.Where(h => rank(h) < 9).OrderBy(rank).FirstOrDefault();
-        if (best != IntPtr.Zero || clock.ElapsedMilliseconds > 2000) break;
-        Thread.Sleep(100);
-      }
-      if (best == IntPtr.Zero) throw new Exception("No open window matches \"" + query + "\"");
+      var best = Best(query, skip, pids, 2000);
+      if (best == IntPtr.Zero) throw new Exception("NOT_FOUND: no open window matches \"" + query + "\"; list_windows shows them");
       var front = Front(best);
       var info = (Dictionary<string, object>)Window(best);
       info["front"] = front;

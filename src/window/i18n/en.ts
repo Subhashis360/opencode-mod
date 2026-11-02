@@ -148,6 +148,19 @@ export default {
   "providers.models.empty": "No models yet. Fetch them, or add one by hand.",
   "providers.models.required": "Pick at least one model",
   "providers.summary": "{{count}} models",
+  "providers.custom": "Custom providers",
+
+  "catalog.title": "OpenCode providers",
+  "catalog.description":
+    "Every provider OpenCode knows, with all its models, including the ones OpenCode hides. Switch a provider off to drop it from the model menu, tick models to show or hide them, or fetch the provider's full model list from its API. Saved in your config's providers section.",
+  "catalog.count": "{{total}} models, {{hidden}} hidden",
+  "catalog.models": "Models",
+  "catalog.showAll": "Show all",
+  "catalog.hideAll": "Hide all",
+  "catalog.fetch": "Fetch all models",
+  "catalog.fetched": "The API listed {{count}} models; {{added}} new ones were added.",
+  "catalog.hidden": "hidden by OpenCode",
+  "catalog.none": "OpenCode lists no models for this provider. Fetch them from its API.",
 
   "config.file": "Saved in {{path}}",
   "config.loading": "Loading your config…",

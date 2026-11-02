@@ -29,6 +29,30 @@ export function useModProviders() {
   }
 }
 
+/** Every provider OpenCode knows and all their models, hidden ones included, from OpenCode's own server. */
+export function useOpenCodeCatalog() {
+  const { ctx, server } = useModServer()
+  const queryClient = useQueryClient()
+  const key = () => [ctx.id, "catalog", server()?.url]
+
+  const query = useQuery(() => ({
+    queryKey: key(),
+    enabled: !!server(),
+    queryFn: async () => {
+      const client = server()!.client
+      const [providers, models] = await Promise.all([client.provider.list(), client.model.list()])
+
+      return { providers: providers.data, models: models.data }
+    },
+  }))
+
+  return {
+    query,
+    // OpenCode reloads the config file after a write, so the catalog is read again a moment later.
+    refresh: () => setTimeout(() => void queryClient.invalidateQueries({ queryKey: key() }), 800),
+  }
+}
+
 /** The global config file as plugin-mod reads it, and a way to change one entry of it. */
 export function useModConfig() {
   const { ctx, server, rpc } = useModServer()

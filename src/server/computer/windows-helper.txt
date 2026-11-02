@@ -25,7 +25,7 @@ function Build([string]$out, [string[]]$sources, [string[]]$references) {
   }
 }
 
-$hostSources = @((Join-Path $dir 'host.cs'), (Join-Path $dir 'see.cs'), (Join-Path $dir 'aurora.cs'))
+$hostSources = @((Join-Path $dir 'host.cs'), (Join-Path $dir 'see.cs'), (Join-Path $dir 'act.cs'), (Join-Path $dir 'aurora.cs'))
 $hostReferences = @('System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll',
   (Join-Path $wpf 'UIAutomationClient.dll'), (Join-Path $wpf 'UIAutomationTypes.dll'), (Join-Path $wpf 'WindowsBase.dll'))
 $hostDll = Join-Path $dir 'host.dll'

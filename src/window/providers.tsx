@@ -1,5 +1,6 @@
 import { createMemo, createSignal, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
+import OpenCodeProviders from "./catalog"
 import { useModProviders, type ModConfig } from "./data"
 import type definition from "./index"
 import { compact, formatPairs, isPlainObject, parsePairs, record, text } from "./model"
@@ -364,6 +365,9 @@ export default function ProvidersTab(props: { config: ModConfig }) {
 
   return (
     <div class="flex flex-col gap-4">
+      <OpenCodeProviders config={props.config} custom={names()} />
+
+      <h3 class="settings-section-title">{ctx.t("providers.custom")}</h3>
       <TabHeader
         description={ctx.t("providers.description")}
         onNew={() => edit(empty())}

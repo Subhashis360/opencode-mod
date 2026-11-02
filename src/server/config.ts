@@ -17,6 +17,7 @@ export const KEYS = [
   "instructions",
   "experimental",
   "provider",
+  "providers",
   "disabled_providers",
   "websearch",
   "warming",

@@ -92,7 +92,7 @@ function Build([string]$out, [string[]]$sources, [string[]]$references) {
   }
 }
 
-$hostSources = @((Join-Path $dir 'host.cs'), (Join-Path $dir 'see.cs'), (Join-Path $dir 'aurora.cs'))
+$hostSources = @((Join-Path $dir 'host.cs'), (Join-Path $dir 'see.cs'), (Join-Path $dir 'act.cs'), (Join-Path $dir 'aurora.cs'))
 $hostReferences = @('System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll',
   (Join-Path $wpf 'UIAutomationClient.dll'), (Join-Path $wpf 'UIAutomationTypes.dll'), (Join-Path $wpf 'WindowsBase.dll'))
 $hostDll = Join-Path $dir 'host.dll'
@@ -238,6 +238,10 @@ namespace OpencodeComputer {
         case "wait_for": return WaitFor(r);
         case "switch": return Switch(Str(r, "query"), Str(r, "skip"), Pids(r));
         case "invoke": return Invoke(r);
+        case "element": return OnWorker(() => Element(r), 8000, "TIMEOUT: the app did not answer in time");
+        case "windows": return ListWindows(r);
+        case "find_window": return FindWindow(r);
+        case "window": return WindowOp(r);
         case "clipboard_get": return Clipboard.ContainsText() ? Clipboard.GetText() : "";
         case "clipboard_set": {
           var text = Str(r, "text");
@@ -480,13 +484,12 @@ namespace OpencodeComputer {
     static object Invoke(Dictionary<string, object> r) {
       int x = Int(r, "x"), y = Int(r, "y");
       var hwnd = new IntPtr(Convert.ToInt64(r.ContainsKey("hwnd") && r["hwnd"] != null ? r["hwnd"] : 0));
-      var name = Str(r, "name") ?? "";
       object result = null;
       Exception failure = null;
       // With a known window, never fall back to the point: whatever is on top there may be another app.
       var worker = new Thread(() => {
         try {
-          var found = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, name, x, y);
+          var found = Refind(r);
           result = found == null && hwnd != IntPtr.Zero
             ? new Dictionary<string, object> { { "invoked", false } }
             : Activate(found, x, y, Bool(r, "force"));
@@ -658,6 +661,8 @@ namespace OpencodeComputer {
       if (single) {
         if (target == IntPtr.Zero) throw new Exception("No app window found; open the app first");
         area = Rectangle.Intersect(WindowRect(target), SystemInformation.VirtualScreen);
+        // A drill-down into one group of a busy window maps only that group's area, so the item limit goes to it.
+        if (Int(r, "cw") > 0) area = Rectangle.Intersect(area, new Rectangle(Int(r, "cx"), Int(r, "cy"), Int(r, "cw"), Int(r, "ch")));
         if (area.Width < 2 || area.Height < 2) throw new Exception("The app window is off screen or minimized");
       }
       Settle(area, Int(r, "settle", 0));
@@ -699,6 +704,9 @@ namespace OpencodeComputer {
         { "windows", windows.Take(10).Select(Window).Where(w => w != null).ToArray() },
         { "front", Window(GetForegroundWindow()) }, { "target", target == IntPtr.Zero ? null : Window(target) },
         { "ocr", ocrStatus }, { "ms", (int)clock.ElapsedMilliseconds }, { "settle", (int)settled },
+        { "groups", boxes.GroupBy(b => b.Win + "|" + b.Name + "|" + b.Rect).Select(g => g.First()).Take(400).Select(b => (object)new Dictionary<string, object> {
+          { "win", b.Win.ToInt64() }, { "name", b.Name }, { "x", b.Rect.X }, { "y", b.Rect.Y }, { "w", b.Rect.Width }, { "h", b.Rect.Height },
+        }).ToArray() },
       };
     }
 
@@ -1209,7 +1217,7 @@ namespace OpencodeComputer {
         return Located(rect, IntPtr.Zero, true);
       }
       if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) return new Dictionary<string, object> { { "found", false }, { "closed", true } };
-      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, name, ox, oy);
+      var element = Refind(hwnd, Str(r, "rid"), name, Str(r, "ctx"), ox, oy, old.Width, old.Height);
       if (element == null) return new Dictionary<string, object> { { "found", false } };
       var shown = Visible(element);
       object pattern;
@@ -1302,9 +1310,9 @@ namespace OpencodeComputer {
     // focus or typing, and reads the result back.
     static object SetValue(Dictionary<string, object> r) {
       var hwnd = Hwnd(r, "hwnd");
-      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, Str(r, "name") ?? "", Int(r, "x"), Int(r, "y"));
-      if (element == null) throw new Exception("That element is no longer there; look again");
-      if (!element.Current.IsEnabled) throw new Exception("That element is disabled");
+      var element = Refind(r);
+      if (element == null) throw new Exception("STALE_REF: that element is no longer there; look again");
+      if (!element.Current.IsEnabled) throw new Exception("DISABLED: that element is disabled");
       var value = Str(r, "value") ?? "";
       object pattern;
       if (element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) {
@@ -1333,17 +1341,19 @@ namespace OpencodeComputer {
         if (element.Current.IsPassword) return "(set)";
         return ((ValuePattern)pattern).Current.Value;
       }
-      throw new Exception("This element cannot be set directly; click it and type instead");
+      throw new Exception("UNSUPPORTED: this element cannot be set directly; click it and type instead");
     }
 
     // Puts the keyboard focus in a field through accessibility, so typing can follow without a mouse click.
     static object Focus(Dictionary<string, object> r) {
       var hwnd = Hwnd(r, "hwnd");
-      var element = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, Str(r, "name") ?? "", Int(r, "x"), Int(r, "y"));
-      if (element == null) throw new Exception("That element is no longer there; look again");
-      if (!element.Current.IsEnabled) throw new Exception("That element is disabled");
+      var element = Refind(r);
+      if (element == null) throw new Exception("STALE_REF: that element is no longer there; look again");
+      if (!element.Current.IsEnabled) throw new Exception("DISABLED: that element is disabled");
       Front(hwnd);
       element.SetFocus();
+      var clock = Stopwatch.StartNew();
+      while (!element.Current.HasKeyboardFocus && clock.ElapsedMilliseconds < 300) Thread.Sleep(20);
       return element.Current.HasKeyboardFocus;
     }
 
@@ -1516,40 +1526,11 @@ namespace OpencodeComputer {
       return null;
     }
 
-    // Brings the best-matching app window to the front: an exact process name first, then a title match.
+    // Brings the best-matching app window to the front. A window that is still opening (just launched, or animating
+    // in) is waited for briefly.
     static object Switch(string query, string skip, HashSet<int> pids) {
-      var wanted = Fold(query);
-      if (wanted.Length == 0) throw new Exception("switch_window needs a window title or app name in text");
-      skip = (skip ?? "").ToLowerInvariant();
-      Func<IntPtr, int> rank = hwnd => {
-        uint pid;
-        GetWindowThreadProcessId(hwnd, out pid);
-        var process = Fold(ProcessName(pid));
-        var title = Fold(TitleOf(hwnd));
-        if (process == wanted) return 0;
-        if (title == wanted) return 1;
-        if (title.StartsWith(wanted)) return 2;
-        if (title.Contains(wanted)) return 3;
-        if (process.Contains(wanted)) return 4;
-        return 9;
-      };
-      // A window that is still opening (just launched, or animating in) is waited for briefly.
-      var best = IntPtr.Zero;
-      var clock = Stopwatch.StartNew();
-      while (true) {
-        var candidates = new List<IntPtr>();
-        EnumWindows((hwnd, data) => {
-          if (IsWindowVisible(hwnd) && GetWindowText(hwnd, new StringBuilder(2), 2) > 0 && (GetWindowLong(hwnd, -20) & 0x80) == 0 && !Own(hwnd, skip, pids)) {
-            int cloaked;
-            if (!(DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0)) candidates.Add(hwnd);
-          }
-          return true;
-        }, IntPtr.Zero);
-        best = candidates.Where(h => rank(h) < 9).OrderBy(rank).FirstOrDefault();
-        if (best != IntPtr.Zero || clock.ElapsedMilliseconds > 2000) break;
-        Thread.Sleep(100);
-      }
-      if (best == IntPtr.Zero) throw new Exception("No open window matches \\"" + query + "\\"");
+      var best = Best(query, skip, pids, 2000);
+      if (best == IntPtr.Zero) throw new Exception("NOT_FOUND: no open window matches \\"" + query + "\\"; list_windows shows them");
       var front = Front(best);
       var info = (Dictionary<string, object>)Window(best);
       info["front"] = front;
@@ -1611,6 +1592,314 @@ namespace OpencodeComputer {
 
     static HashSet<int> Pids(Dictionary<string, object> r) {
       return new HashSet<int>((Str(r, "pids") ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(int.Parse));
+    }
+  }
+}
+`;
+
+// src/server/computer/windows-act.txt
+var windows_act_default = `using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Windows.Automation;
+
+namespace OpencodeComputer {
+  // Element verbs beyond a click (expand, collapse, select, scroll into view, inspect), window management, and the
+  // identity check that keeps an old ref from landing on a different control that took its place.
+  public static partial class Host {
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT value, int size);
+
+    // A control whose runtime id no longer resolves was either rebuilt by its app (new id, same control) or removed,
+    // with a same-named control now in its place: after a row is deleted, the next row's "Delete" slides up to the
+    // same spot. A name match only counts as the same control when it sits where the old one was and inside the same
+    // named group; anything else is reported as gone instead of pressed.
+    static AutomationElement Refind(IntPtr hwnd, string rid, string name, string ctx, int x, int y, int w, int h) {
+      var found = ByRid(hwnd, rid);
+      if (found != null) return found;
+      var near = Find(hwnd, name ?? "", x, y);
+      if (near == null || string.IsNullOrEmpty(rid)) return near;
+      var rect = near.Current.BoundingRectangle;
+      if (rect.IsEmpty) return null;
+      if (Math.Abs(rect.X + rect.Width / 2 - x) > Math.Max(24, w) || Math.Abs(rect.Y + rect.Height / 2 - y) > Math.Max(16, h)) return null;
+      if (!string.IsNullOrEmpty(ctx) && GroupOf(near, hwnd) != ctx) return null;
+      return near;
+    }
+
+    // The same lookup for requests that give an element's centre and size.
+    static AutomationElement Refind(Dictionary<string, object> r) {
+      return Refind(Hwnd(r, "hwnd"), Str(r, "rid"), Str(r, "name"), Str(r, "ctx"), Int(r, "x"), Int(r, "y"), Int(r, "w"), Int(r, "h"));
+    }
+
+    // The group the screen map files an element under: its innermost named container or row, or the one around that
+    // when the innermost is named after the element itself (a cell "Edit" around an "Edit" button).
+    static string GroupOf(AutomationElement element, IntPtr hwnd) {
+      var title = TitleOf(hwnd);
+      var own = Clean(element.Current.Name);
+      var walker = TreeWalker.ControlViewWalker;
+      string first = null;
+      var node = walker.GetParent(element);
+      for (var depth = 0; node != null && depth < 40; depth++) {
+        if ((long)node.Current.NativeWindowHandle == hwnd.ToInt64()) break;
+        var type = Kind(node);
+        var name = Clean(node.Current.Name);
+        if ((Containers.Contains(type) || Rows.Contains(type)) && name.Length > 0 && name.Length <= 80 && name != title) {
+          if (first != null || name != own) return name;
+          first = name;
+        }
+        node = walker.GetParent(node);
+      }
+      return first ?? "";
+    }
+
+    // Any control with this exact name in the window, on screen or scrolled out of view.
+    static AutomationElement FindAny(IntPtr hwnd, string name) {
+      if (hwnd == IntPtr.Zero || name.Length == 0 || !IsWindow(hwnd)) return null;
+      return Find(hwnd, name, 0, 0) ?? AutomationElement.FromHandle(hwnd).FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, name));
+    }
+
+    static string Kind(AutomationElement element) {
+      return element.Current.ControlType.ProgrammaticName.Replace("ControlType.", "").ToLowerInvariant();
+    }
+
+    static object Element(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) throw new Exception("STALE_REF: its window closed; look again");
+      var any = Bool(r, "any");
+      var element = any ? FindAny(hwnd, Str(r, "name") ?? "") : Refind(r);
+      if (element == null)
+        throw new Exception(any ? "NOT_FOUND: nothing named \\"" + Str(r, "name") + "\\" in this app" : "STALE_REF: that element is no longer there; look again");
+      var verb = Str(r, "do");
+      if (verb == "inspect") return Inspect(element);
+      if (!element.Current.IsEnabled) throw new Exception("DISABLED: that element is disabled");
+      // Classic Win32 and WinForms trees and lists change through accessibility without telling the app: a collapse
+      // sends no TVN_ITEMEXPANDED and a list selection no change event. Those take the keys or the click a person uses.
+      var classic = element.Current.FrameworkId == "Win32" || element.Current.FrameworkId == "WinForm";
+      object pattern;
+      switch (verb) {
+        case "expand":
+        case "collapse": {
+          if (!element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern))
+            throw new Exception("UNSUPPORTED: this element does not expand or collapse; click it instead");
+          var expand = (ExpandCollapsePattern)pattern;
+          var wanted = verb == "expand" ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+          if (expand.Current.ExpandCollapseState == wanted) return wanted.ToString().ToLowerInvariant() + " already";
+          var via = "";
+          if (classic && element.Current.ControlType == ControlType.TreeItem && Front(hwnd)) {
+            try { element.SetFocus(); } catch { }
+            Thread.Sleep(40);
+            // Right opens a closed node and Left closes an open one; the window must be in front to get them.
+            if (GetForegroundWindow() == hwnd && element.Current.HasKeyboardFocus) {
+              var key = verb == "expand" ? (ushort)0x27 : (ushort)0x25;
+              Key(key, false);
+              Key(key, true);
+              via = " (keyboard)";
+            }
+          }
+          if (via.Length == 0) { if (verb == "expand") expand.Expand(); else expand.Collapse(); }
+          var clock = Stopwatch.StartNew();
+          while (expand.Current.ExpandCollapseState != wanted && clock.ElapsedMilliseconds < 800) Thread.Sleep(20);
+          return expand.Current.ExpandCollapseState.ToString().ToLowerInvariant() + via;
+        }
+        case "select": {
+          if (classic && element.Current.ControlType == ControlType.ListItem && !Bool(r, "force"))
+            return new Dictionary<string, object> { { "mouse", true } };
+          if (!element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern))
+            throw new Exception("UNSUPPORTED: this element cannot be selected; click it instead");
+          var item = (SelectionItemPattern)pattern;
+          item.Select();
+          return item.Current.IsSelected ? "selected" : "select requested, the app did not report it selected";
+        }
+        case "scroll_to": {
+          if (!element.TryGetCurrentPattern(ScrollItemPattern.Pattern, out pattern))
+            throw new Exception("UNSUPPORTED: this element cannot be scrolled into view; scroll its list instead");
+          ((ScrollItemPattern)pattern).ScrollIntoView();
+          Thread.Sleep(80);
+          return element.Current.IsOffscreen ? "scroll requested, it is still off screen" : "in view";
+        }
+        default: throw new Exception("INVALID_ARGS: unknown element operation " + verb);
+      }
+    }
+
+    // Everything accessibility knows about one element, including the actions it supports.
+    static object Inspect(AutomationElement element) {
+      var current = element.Current;
+      var bounds = current.BoundingRectangle;
+      var info = new Dictionary<string, object> {
+        { "type", Kind(element) }, { "name", Clean(current.Name) }, { "automation_id", current.AutomationId ?? "" },
+        { "class", current.ClassName ?? "" }, { "framework", current.FrameworkId ?? "" }, { "help", Clean(current.HelpText) },
+        { "enabled", current.IsEnabled }, { "focused", current.HasKeyboardFocus }, { "offscreen", current.IsOffscreen },
+        { "password", current.IsPassword },
+      };
+      if (!bounds.IsEmpty) info["rect"] = Rect(new Rectangle((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height));
+      var actions = new List<string>();
+      object pattern;
+      if (element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) actions.Add("click_element");
+      if (element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) {
+        actions.Add("set_value true/false");
+        info["toggle"] = ((TogglePattern)pattern).Current.ToggleState.ToString().ToLowerInvariant();
+      }
+      if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern)) {
+        actions.Add("select");
+        info["selected"] = ((SelectionItemPattern)pattern).Current.IsSelected;
+      }
+      if (element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern)) {
+        actions.Add("expand");
+        actions.Add("collapse");
+        info["expand"] = ((ExpandCollapsePattern)pattern).Current.ExpandCollapseState.ToString().ToLowerInvariant();
+      }
+      if (element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)) {
+        var value = (ValuePattern)pattern;
+        if (!value.Current.IsReadOnly) actions.Add("set_value");
+        info["readonly"] = value.Current.IsReadOnly;
+        if (!current.IsPassword) info["value"] = Clean(value.Current.Value);
+      }
+      if (element.TryGetCurrentPattern(RangeValuePattern.Pattern, out pattern)) {
+        var range = (RangeValuePattern)pattern;
+        actions.Add("set_value number");
+        info["range"] = new Dictionary<string, object> {
+          { "value", range.Current.Value }, { "min", range.Current.Minimum }, { "max", range.Current.Maximum }, { "step", range.Current.SmallChange },
+        };
+      }
+      if (element.TryGetCurrentPattern(ScrollItemPattern.Pattern, out pattern)) actions.Add("scroll_to");
+      if (element.TryGetCurrentPattern(ScrollPattern.Pattern, out pattern)) {
+        var scroll = (ScrollPattern)pattern;
+        actions.Add("scroll");
+        info["scroll"] = new Dictionary<string, object> {
+          { "vertical", scroll.Current.VerticallyScrollable ? Math.Round(scroll.Current.VerticalScrollPercent) : -1 },
+          { "horizontal", scroll.Current.HorizontallyScrollable ? Math.Round(scroll.Current.HorizontalScrollPercent) : -1 },
+        };
+      }
+      if (element.TryGetCurrentPattern(SelectionPattern.Pattern, out pattern))
+        info["selection"] = ((SelectionPattern)pattern).Current.GetSelection().Cast<AutomationElement>().Take(20).Select(e => Clean(e.Current.Name)).ToArray();
+      if (current.IsKeyboardFocusable) actions.Add("focus");
+      if (!current.IsPassword && element.TryGetCurrentPattern(TextPattern.Pattern, out pattern)) {
+        try { info["text"] = ((TextPattern)pattern).DocumentRange.GetText(4000); } catch { }
+      }
+      info["actions"] = actions.ToArray();
+      var children = element.FindAll(TreeScope.Children, Condition.TrueCondition);
+      info["children_count"] = children.Count;
+      info["children"] = children.Cast<AutomationElement>().Take(15).Select(c => Kind(c) + " \\"" + Cut(Clean(c.Current.Name)) + "\\"").ToArray();
+      return info;
+    }
+
+    // Windows a person could switch to: visible, titled, not a tool window, not cloaked, not OpenCode's own.
+    static bool Listed(IntPtr hwnd, string skip, HashSet<int> pids) {
+      if (!IsWindowVisible(hwnd) || GetWindowText(hwnd, new StringBuilder(2), 2) == 0 || (GetWindowLong(hwnd, -20) & 0x80) != 0) return false;
+      int cloaked;
+      if (DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0) return false;
+      var cls = ClassOf(hwnd);
+      if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd") return false;
+      return !Own(hwnd, skip, pids);
+    }
+
+    // The best window for a name: an exact process name first, then a title match. A window that is still opening is
+    // waited for up to \`wait\` ms.
+    static IntPtr Best(string query, string skip, HashSet<int> pids, int wait) {
+      var wanted = Fold(query);
+      if (wanted.Length == 0) throw new Exception("INVALID_ARGS: a window title or app name is required");
+      skip = (skip ?? "").ToLowerInvariant();
+      Func<IntPtr, int> rank = hwnd => {
+        uint pid;
+        GetWindowThreadProcessId(hwnd, out pid);
+        var process = Fold(ProcessName(pid));
+        var title = Fold(TitleOf(hwnd));
+        if (process == wanted) return 0;
+        if (title == wanted) return 1;
+        if (title.StartsWith(wanted)) return 2;
+        if (title.Contains(wanted)) return 3;
+        if (process.Contains(wanted)) return 4;
+        return 9;
+      };
+      var clock = Stopwatch.StartNew();
+      while (true) {
+        var candidates = new List<IntPtr>();
+        EnumWindows((hwnd, data) => { if (Listed(hwnd, skip, pids)) candidates.Add(hwnd); return true; }, IntPtr.Zero);
+        var best = candidates.Where(h => rank(h) < 9).OrderBy(rank).FirstOrDefault();
+        if (best != IntPtr.Zero || clock.ElapsedMilliseconds > wait) return best;
+        Thread.Sleep(100);
+      }
+    }
+
+    // The visible frame, without the invisible resize borders Windows 10 and later add around GetWindowRect.
+    static Rectangle FrameRect(IntPtr hwnd) {
+      RECT rect;
+      if (DwmGetWindowAttribute(hwnd, 9, out rect, Marshal.SizeOf(typeof(RECT))) == 0)
+        return new Rectangle(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+      return WindowRect(hwnd);
+    }
+
+    static Dictionary<string, object> Placement(IntPtr hwnd) {
+      var info = (Dictionary<string, object>)Window(hwnd);
+      var minimized = IsIconic(hwnd);
+      info["state"] = minimized ? "minimized" : IsZoomed(hwnd) ? "maximized" : "normal";
+      if (!minimized) info["bounds"] = Rect(FrameRect(hwnd));
+      info["front"] = GetForegroundWindow() == hwnd;
+      return info;
+    }
+
+    static object ListWindows(Dictionary<string, object> r) {
+      var skip = (Str(r, "skip") ?? "").ToLowerInvariant();
+      var pids = Pids(r);
+      var list = new List<object>();
+      EnumWindows((hwnd, data) => {
+        if (Listed(hwnd, skip, pids) && list.Count < 60) list.Add(Placement(hwnd));
+        return true;
+      }, IntPtr.Zero);
+      return list.ToArray();
+    }
+
+    // A window by its handle while it is still open, or by a title or app name.
+    static object FindWindow(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      var query = Str(r, "query");
+      if (string.IsNullOrWhiteSpace(query)) {
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) throw new Exception("NOT_FOUND: no app window to work in; pass its title or app name in text");
+        return Placement(hwnd);
+      }
+      var found = Best(query, Str(r, "skip"), Pids(r), 1000);
+      if (found == IntPtr.Zero) throw new Exception("NOT_FOUND: no open window matches \\"" + query + "\\"; list_windows shows them");
+      return Placement(found);
+    }
+
+    static object WindowOp(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) throw new Exception("STALE_REF: that window is closed");
+      switch (Str(r, "do")) {
+        case "minimize": ShowWindow(hwnd, 6); break;
+        case "maximize": ShowWindow(hwnd, 3); break;
+        case "restore": ShowWindow(hwnd, 9); break;
+        case "close": {
+          // Asks the app to close the way its close button does, so it can still ask to save first.
+          PostMessage(hwnd, 0x10, IntPtr.Zero, IntPtr.Zero);
+          var clock = Stopwatch.StartNew();
+          while (IsWindow(hwnd) && IsWindowVisible(hwnd) && clock.ElapsedMilliseconds < 1500) Thread.Sleep(50);
+          var closed = !IsWindow(hwnd) || !IsWindowVisible(hwnd);
+          return new Dictionary<string, object> { { "closed", closed } };
+        }
+        case "move": {
+          if (IsIconic(hwnd) || IsZoomed(hwnd)) { ShowWindow(hwnd, 9); Thread.Sleep(150); }
+          var outer = WindowRect(hwnd);
+          var frame = FrameRect(hwnd);
+          int left = frame.X - outer.X, top = frame.Y - outer.Y, right = outer.Right - frame.Right, bottom = outer.Bottom - frame.Bottom;
+          int w = Int(r, "width"), h = Int(r, "height");
+          uint flags = 0x4 | 0x10;
+          if (w <= 0 || h <= 0) { flags |= 0x1; w = frame.Width; h = frame.Height; }
+          if (!SetWindowPos(hwnd, IntPtr.Zero, Int(r, "x") - left, Int(r, "y") - top, w + left + right, h + top + bottom, flags))
+            throw new Exception("BLOCKED: Windows refused to move that window (error " + Marshal.GetLastWin32Error() + "); it may be running as administrator");
+          break;
+        }
+        default: throw new Exception("INVALID_ARGS: unknown window operation " + Str(r, "do"));
+      }
+      Thread.Sleep(150);
+      return Placement(hwnd);
     }
   }
 }
@@ -1969,7 +2258,7 @@ async function tempDir() {
   await mkdir2(dir, { recursive: true });
   return dir;
 }
-var SOURCES = { "helper.ps1": windows_helper_default, "host.cs": windows_host_default, "see.cs": windows_see_default, "ocr.cs": windows_ocr_default, "aurora.cs": windows_aurora_default };
+var SOURCES = { "helper.ps1": windows_helper_default, "host.cs": windows_host_default, "see.cs": windows_see_default, "act.cs": windows_act_default, "ocr.cs": windows_ocr_default, "aurora.cs": windows_aurora_default };
 async function launch() {
   const hash = createHash("sha1");
   for (const text of Object.values(SOURCES))
@@ -2174,7 +2463,7 @@ var description_default = `Controls the user's desktop, and Android phones over 
 
 Before driving any screen, pick the fastest way to the result. Think about where the data or action really lives:
 1. Files, settings, command-line tools, APIs and feeds: the shell and webfetch tools do it in one step, with no screen at all (for example a game's or service's public API, an app's export, a log file, \`winget\`, \`Get-Process\`).
-2. Websites, web games and web versions of apps (WhatsApp, Telegram, Discord, Slack, email): the browser tool reads pages as text, runs JavaScript and shows the API calls and WebSocket messages a page makes. Use it instead of screenshots of a browser window.
+2. Public web pages: webfetch reads them as text. Pages that need the user's login or clicks run in their browser window, and Chrome, Edge and Firefox expose page content to accessibility, so read_window, click_element and set_value work on them too.
 3. Desktop apps: read_window, click_element, set_value, wait_for and watch work through accessibility as text, with no picture.
 4. Screenshots and pointer clicks: only for what has no text (canvases, images, games drawn as pictures) or when the faster ways fail.
 To follow something over time (new messages, a download, a build, a game's moves) use watch or wait_for, never repeated screenshots.
@@ -2182,6 +2471,7 @@ To follow something over time (new messages, a download, a build, a game's moves
 Every look comes with a screen map. Act on it, not on pixels you estimate from the picture:
 - A screenshot comes with a text map of the whole display: each window, the named groups inside it, and every control and piece of visible text as a line like \`[12] button "Login" @412,88 disabled\` or \`[30] ocr "Start Game" @150,250\`. The same [n] is drawn on the picture next to the element, so the picture and the text point at the same things. \`ocr\` lines are text an app draws itself (games, canvases, web pages), read by Windows OCR.
 - Pass ref: n to act on an element: click_element, set_value, left_click, double_click, right_click, mouse_move, scroll, zoom, type (clicks the field first), left_click_drag (start_ref and ref). The tool looks the element up again where it is now, so a ref never clicks where something used to be, and it fails clearly when the element is gone or covered. Refs stay the same while an element stays on screen, so you can plan several steps from one look.
+- A ref only ever means the element it was given to. If that element is removed and another with the same name takes its place (the next row's "Delete" after a row is deleted), the action fails with STALE_REF instead of pressing the newcomer.
 - Several elements can share a name (three "Login" buttons). The map shows which group each sits in; pick by ref. Text lookups that match several elements equally fail and list them with refs instead of guessing. 'Admin > Login' means the Login inside the group or window "Admin".
 - Each coordinate click reports what it landed on (\`-> button "Login" in "Sign in"\`). If that is not what you meant, fix it before going on.
 
@@ -2191,7 +2481,9 @@ Work quickly. Every model turn costs several seconds, far more than any action, 
 - set_value (ref or text, value) fills a field, picks a drop-down or list option, sets a checkbox (true/false) or a slider (number) in one step, instead of click + select-all + type. It reads the result back.
 - wait_for (text, duration = timeout seconds, gone?) waits until text appears (or with gone: true, disappears) in a window title, the app or on screen, checking several times a second. Use it instead of wait + screenshot for dialogs, loading and saving.
 - watch (text?, duration = timeout seconds, default 10, max 120) waits until new text appears in the app you are working in (new chat messages, notifications, log lines) and returns only the new lines, with no picture. The first watch of a window notes what is already there. text keeps only lines containing it.
-- switch_window (text) brings an open app or window to the front.
+- Busy apps (chat apps, IDE-like tools, big tables): read_window with skeleton: true first lists the window's named groups as a tree with ids and element counts; then read_window with within: "g12" lists just that group, with the whole element limit spent on it.
+- inspect (ref or text) shows everything about one control: its value or full text, range, scroll position, selection, children and the actions it supports. expand, collapse, select, focus and scroll_to (ref or text) do those directly through accessibility; scroll_to and inspect also reach a control scrolled out of view by its exact name.
+- switch_window (text) brings an open app or window to the front. list_windows lists every app window with its state and where it is. minimize_window, maximize_window, restore_window and close_window act on the window named in text (default: the app you are working in); move_window takes region [x0, y0, x1, y1] for new bounds or coordinate for a new top-left corner. close_window asks the app to close the way its close button does, so it may ask to save first.
 - Plan the task and send it as one call with actions: [...] (run in order, stopping at the first failure, which is reported). E.g. [click_element ref 12, wait_for "Save As", set_value "File name" = "report.pdf", click_element "Save", wait_for "Save As" gone: true]. One call with five steps is five times faster than five calls.
 - Clicks, drag, scroll, key, type, wait, open_application and switch_window return a fresh screenshot and map automatically, taken once the screen stops changing. Never follow them with a separate screenshot call; set screenshot_after: false only when you will not need to look before your next call. Use marks: false for a clean picture when the numbers would hide what you need to see (a game board), and zoom (region or ref) for small details.
 - Do not add a wait between steps. Every click, key, type, scroll, drag and open already waits for the screen to settle before it hands back its screenshot, so what you get is already current \u2014 a wait on top of that just burns a whole model turn (several seconds) and the pause itself, and makes the run feel slow. When something loads, saves, downloads or appears on its own, use wait_for or watch: they return the instant it is ready instead of pausing a fixed guess. Reach for plain wait only in the rare case where nothing on screen ever signals that the app is ready (a splash with no text, a timed animation), and keep the duration as short as will do.
@@ -2199,15 +2491,21 @@ Work quickly. Every model turn costs several seconds, far more than any action, 
 Coordinates:
 - All coordinates are in the screenshot frame of the current display (shown by screenshot, read_window and list_displays), not physical pixels. Display 0 is the primary; pass display to switch.
 
+Errors start with a code and say whether trying again can help, for example \`STALE_REF (look again before retrying): ...\`:
+- safe to retry: nothing happened that repeating could double (a read that timed out). Repeat it as is.
+- look again before retrying: the screen changed under the action (STALE_REF, NOT_FOUND, DISABLED). Look, then act on the new refs.
+- do not retry: the same call will fail again (AMBIGUOUS_TARGET: pass a ref; COVERED: switch_window or click_element; BLOCKED, UNSUPPORTED, INVALID_ARGS: change the approach).
+
 Actions:
-- screenshot (marks?), zoom (region or ref), read_window (text?, coordinate?), list_displays, cursor_position
-- click_element (ref or text), set_value (ref or text, value), wait_for (text, duration?, gone?), watch (text?, duration?), switch_window (text)
+- screenshot (marks?), zoom (region or ref), read_window (text?, coordinate?, skeleton?, within?), inspect (ref or text), list_displays, list_windows, cursor_position
+- click_element (ref or text), set_value (ref or text, value; '' clears a field), expand, collapse, select, focus, scroll_to (ref or text), wait_for (text, duration?, gone?), watch (text?, duration?)
+- switch_window (text), minimize_window, maximize_window, restore_window, close_window (text?), move_window (text?, region or coordinate)
 - mouse_move, left_click, right_click, middle_click, double_click, triple_click (ref or coordinate; omit both to use the cursor position; text holds modifier keys such as "shift" or "ctrl")
 - left_click_drag (start_ref or start_coordinate, ref or coordinate), left_mouse_down, left_mouse_up
 - scroll (ref or coordinate?, scroll_direction, scroll_amount)
 - type (text, ref?), key (text: "ctrl+s", "alt+tab", "Return", or space-separated sequences like "Down Down Enter"), hold_key (text, duration)
 - wait (duration in seconds, max 10): a last-resort fixed pause \u2014 avoid it, prefer wait_for or watch, and never add it just to let the screen update after an action
-- open_application (text: app name), read_clipboard, write_clipboard (text)
+- open_application (text: app name), read_clipboard, write_clipboard (text; empty clears it)
 
 Android phones (device: "android", or a serial from list_displays with device "android"):
 - Add device to any step. screenshot returns the phone's screen with its map (from the phone's accessibility tree plus OCR); read_window returns the map without a picture.
@@ -2848,7 +3146,7 @@ async function run(step, ctx) {
   const entryFor = (ref) => {
     const entry = ctx.refs.get(ref);
     if (!entry || entry.item.win !== phone.win)
-      throw new Error(`There is no element [${ref}] on this phone; take a screenshot for current refs`);
+      throw new Error(`STALE_REF: There is no element [${ref}] on this phone; take a screenshot for current refs`);
     return entry;
   };
   const label = (entry) => line(entry, { toFrame: (x, y) => `${Math.round(x * frame(phone).scale)},${Math.round(y * frame(phone).scale)}` }, true);
@@ -2861,7 +3159,7 @@ async function run(step, ctx) {
       throw new Error(`"${query}" matches ${match.candidates.length} elements; pass ref to pick one:
 ${match.candidates.slice(0, 8).map(label).join(`
 `)}`);
-    throw new Error(`No element matching "${query}" on the phone; take a screenshot`);
+    throw new Error(`NOT_FOUND: No element matching "${query}" on the phone; take a screenshot`);
   };
   const pointOf = (ref, coordinate, name = "coordinate") => {
     if (ref !== undefined)
@@ -3055,7 +3353,57 @@ ${match.candidates.slice(0, 8).map(label).join(`
       return `waited ${ms / 1000}s`;
     }
   }
-  throw new Error(`${action} is not available on a phone; use tap (left_click), swipe (left_click_drag), scroll, type and key`);
+  throw new Error(`UNSUPPORTED: ${action} is not available on a phone; use tap (left_click), swipe (left_click_drag), scroll, type and key`);
+}
+
+// src/server/computer/errors.ts
+class ComputerError extends Error {
+  code;
+  retry;
+  constructor(code, message, retry = "look_first") {
+    super(message);
+    this.code = code;
+    this.retry = retry;
+  }
+}
+var fail = (code, message, retry = "look_first") => new ComputerError(code, message, retry);
+var HINT = {
+  safe: "safe to retry",
+  look_first: "look again before retrying",
+  no: "do not retry, change the approach"
+};
+var READS = new Set([
+  "screenshot",
+  "zoom",
+  "read_window",
+  "inspect",
+  "list_displays",
+  "list_windows",
+  "cursor_position",
+  "wait_for",
+  "watch",
+  "read_clipboard"
+]);
+function classify(error, action) {
+  if (error instanceof ComputerError)
+    return error;
+  const text = error instanceof Error ? error.message : String(error);
+  const coded = /^([A-Z][A-Z_]{2,}): ([\s\S]*)$/.exec(text);
+  if (coded) {
+    const code = coded[1];
+    const retry = code === "TIMEOUT" ? READS.has(action) ? "safe" : "look_first" : code === "STALE_REF" || code === "NOT_FOUND" || code === "DISABLED" ? "look_first" : "no";
+    return new ComputerError(code, coded[2], retry);
+  }
+  if (/timed out|took too long/.test(text))
+    return new ComputerError("TIMEOUT", text, READS.has(action) ? "safe" : "look_first");
+  if (/blocked the input/.test(text))
+    return new ComputerError("BLOCKED", text, "no");
+  if (/helper (stopped|did not start)/.test(text))
+    return new ComputerError("HELPER_DOWN", text, "safe");
+  return new ComputerError("FAILED", text, READS.has(action) ? "safe" : "look_first");
+}
+function format2(error) {
+  return `${error.code} (${HINT[error.retry]}): ${error.message}`;
 }
 
 // src/server/computer/tool.ts
@@ -3086,7 +3434,19 @@ var ACTIONS = [
   "wait",
   "open_application",
   "read_clipboard",
-  "write_clipboard"
+  "write_clipboard",
+  "inspect",
+  "expand",
+  "collapse",
+  "select",
+  "focus",
+  "scroll_to",
+  "list_windows",
+  "minimize_window",
+  "maximize_window",
+  "restore_window",
+  "close_window",
+  "move_window"
 ];
 var StepFields = {
   action: Schema2.Literals(ACTIONS).annotate({ description: "The action to perform" }),
@@ -3100,9 +3460,17 @@ var StepFields = {
   start_coordinate: Schema2.optional(Schema2.Array(Schema2.Number)).annotate({
     description: "[x, y] where left_click_drag starts"
   }),
-  region: Schema2.optional(Schema2.Array(Schema2.Number)).annotate({ description: "[x0, y0, x1, y1] for zoom" }),
+  region: Schema2.optional(Schema2.Array(Schema2.Number)).annotate({
+    description: "[x0, y0, x1, y1]: the area for zoom, or the new bounds for move_window"
+  }),
   text: Schema2.optional(Schema2.String).annotate({
-    description: "type: text to type. key/hold_key: keys like 'ctrl+s' or 'Down Down Enter'. Click actions: modifier keys to hold. click_element/set_value/read_window/wait_for: text to find ('Admin > Login' = the Login inside Admin). switch_window/open_application: app or window name. write_clipboard: text"
+    description: "type: text to type. key/hold_key: keys like 'ctrl+s' or 'Down Down Enter'. Click actions: modifier keys to hold. click_element/set_value/read_window/wait_for/inspect/expand/collapse/select/focus/scroll_to: text to find ('Admin > Login' = the Login inside Admin). switch_window/open_application and the *_window actions: app or window name (default: the app you are working in). write_clipboard: text"
+  }),
+  skeleton: Schema2.optional(Schema2.Boolean).annotate({
+    description: "read_window: list the window's named groups (panes, toolbars, lists) with ids and element counts instead of every element. Use it first on busy apps, then read one group with within"
+  }),
+  within: Schema2.optional(Schema2.String).annotate({
+    description: "read_window: only the elements inside this group, by its id from skeleton (g12) or its name"
   }),
   value: Schema2.optional(Schema2.String).annotate({
     description: "set_value: the text, the option to pick, true/false for a checkbox, or a number for a slider"
@@ -3191,12 +3559,19 @@ var CHANGES_SCREEN = new Set([
   "hold_key",
   "wait",
   "open_application",
-  "switch_window"
+  "switch_window",
+  "minimize_window",
+  "maximize_window",
+  "restore_window",
+  "close_window",
+  "move_window"
 ]);
+var ARRANGE = new Set(["minimize_window", "maximize_window", "restore_window", "move_window"]);
 var SETTABLE = new Set(["edit", "combobox", "checkbox", "radiobutton", "slider", "spinner", "document", "list"]);
 var current = new Map;
 var workingIn = new Map;
 var books = new Map;
+var groupIds = new Map;
 var watched = new Map;
 var displays;
 function book(sessionID) {
@@ -3204,6 +3579,33 @@ function book(sessionID) {
   if (!refs)
     books.set(sessionID, refs = new Refs);
   return refs;
+}
+function groupId(sessionID, group) {
+  let known = groupIds.get(sessionID);
+  if (!known)
+    groupIds.set(sessionID, known = { ids: new Map, groups: new Map });
+  const key = `${group.win}|${group.name}|${group.x},${group.y},${group.w},${group.h}`;
+  let id = known.ids.get(key);
+  if (!id) {
+    if (known.ids.size > 2000)
+      known.ids.clear();
+    id = `g${known.groups.size + 1}`;
+    known.ids.set(key, id);
+  }
+  known.groups.set(id, group);
+  return id;
+}
+function located(item) {
+  return {
+    hwnd: item.win,
+    rid: item.rid,
+    name: item.name,
+    ctx: item.ctx,
+    x: item.x + item.w / 2,
+    y: item.y + item.h / 2,
+    w: item.w,
+    h: item.h
+  };
 }
 async function screens(refresh = false) {
   if (!refresh && displays && Date.now() - displays.at < 15000)
@@ -3228,6 +3630,113 @@ function toFrame(display, x, y) {
   const { scale } = frame2(display);
   return `${Math.round((x - display.x) * scale)},${Math.round((y - display.y) * scale)}`;
 }
+function seeWindow(hwnd, display) {
+  return {
+    scope: "window",
+    hwnd,
+    skip: "opencode",
+    pids: PIDS,
+    ocr: "auto",
+    x: display.x,
+    y: display.y,
+    width: display.width,
+    height: display.height
+  };
+}
+function skeleton(sessionID, map, entries, screen) {
+  const { scale } = frame2(screen);
+  const centre = (item) => ({ x: item.x + item.w / 2, y: item.y + item.h / 2 });
+  const holds = (group, x, y) => x >= group.x && y >= group.y && x < group.x + group.w && y < group.y + group.h;
+  const rows = (map.groups ?? []).map((group) => ({
+    group,
+    inside: entries.filter((entry) => {
+      const c = centre(entry.item);
+      return entry.item.win === group.win && holds(group, c.x, c.y);
+    }),
+    children: []
+  })).filter((row) => row.inside.length > 0);
+  const area = (row) => row.group.w * row.group.h;
+  const roots = [];
+  for (const row of rows) {
+    const parent = rows.filter((other) => other !== row && other.group.win === row.group.win && area(other) > area(row) && holds(other.group, row.group.x + row.group.w / 2, row.group.y + row.group.h / 2)).sort((a, b) => area(a) - area(b))[0];
+    (parent ? parent.children : roots).push(row);
+  }
+  const out = [];
+  const LIMIT = 80;
+  const visit = (list, depth) => {
+    for (const row of list.toSorted((a, b) => a.group.y - b.group.y || a.group.x - b.group.x)) {
+      if (out.length >= LIMIT)
+        return;
+      const kinds = new Map;
+      for (const entry of row.inside) {
+        const kind = entry.item.src === "ocr" ? "text" : entry.item.type;
+        kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
+      }
+      const top = [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([kind, n]) => `${n} ${kind}`).join(", ");
+      const g = row.group;
+      out.push(`${"  ".repeat(Math.min(depth, 5))}${groupId(sessionID, g)} "${g.name}" @${toFrame(screen, g.x, g.y)} ${Math.round(g.w * scale)}x${Math.round(g.h * scale)}: ${row.inside.length} (${top})`);
+      visit(row.children, depth + 1);
+    }
+  };
+  visit(roots, 0);
+  const loose = entries.filter((entry) => {
+    const c = centre(entry.item);
+    return !rows.some((row) => row.group.win === entry.item.win && holds(row.group, c.x, c.y));
+  }).length;
+  const notes = [
+    `${rows.length} groups, ${entries.length} elements${loose ? `, ${loose} outside any group` : ""}`,
+    ...rows.length > out.length ? [`${rows.length - out.length} more groups not listed`] : [],
+    ...map.partial ? ["the app is slow, so the map may be cut short"] : []
+  ];
+  return `${describeWindow(map.target)} skeleton (${notes.join("; ")}). read_window within: "<id>" lists one group:
+${out.map((line2) => `  ${line2}`).join(`
+`)}`;
+}
+function inspection(label, info, display) {
+  const { scale } = frame2(display);
+  const ids = [
+    info.automation_id && `id "${info.automation_id}"`,
+    info.class && `class "${info.class}"`,
+    info.framework && `framework ${info.framework}`
+  ].filter(Boolean);
+  const state = [
+    info.enabled ? "enabled" : "disabled",
+    info.focused && "focused",
+    info.offscreen && "off screen",
+    info.password && "password",
+    info.readonly && "read-only",
+    info.toggle && `toggle ${info.toggle}`,
+    info.selected && "selected",
+    info.expand && info.expand !== "leafnode" && info.expand
+  ].filter(Boolean);
+  const lines = [
+    label,
+    `${info.type} "${info.name}"${ids.length ? ` \xB7 ${ids.join(" \xB7 ")}` : ""}`,
+    `state: ${state.join(", ")}`,
+    ...info.rect ? [
+      contains(display, info.rect.x + info.rect.w / 2, info.rect.y + info.rect.h / 2) ? `at: @${toFrame(display, info.rect.x + info.rect.w / 2, info.rect.y + info.rect.h / 2)} ${Math.round(info.rect.w * scale)}x${Math.round(info.rect.h * scale)}` : "at: outside the current display"
+    ] : [],
+    `actions: ${info.actions.length ? info.actions.join(", ") : "none through accessibility (a real click may still work)"}`,
+    ...info.value !== undefined ? [`value: "${info.value}"`] : [],
+    ...info.range ? [`range: ${info.range.value} (${info.range.min} to ${info.range.max}, step ${info.range.step})`] : [],
+    ...info.scroll ? [
+      `scroll: ${[
+        info.scroll.vertical >= 0 && `vertical ${info.scroll.vertical}%`,
+        info.scroll.horizontal >= 0 && `horizontal ${info.scroll.horizontal}%`
+      ].filter(Boolean).join(", ")}`
+    ] : [],
+    ...info.selection?.length ? [`selection: ${info.selection.map((name) => `"${name}"`).join(", ")}`] : [],
+    ...info.help ? [`help: ${info.help}`] : [],
+    ...info.children_count ? [
+      `children (${info.children_count}): ${info.children.join(", ")}${info.children_count > info.children.length ? ", ..." : ""}`
+    ] : [],
+    ...info.text && info.text !== info.value && info.text !== info.name ? [`text:
+${info.text}${info.text.length >= 4000 ? `
+(cut at 4000 characters)` : ""}`] : []
+  ];
+  return lines.join(`
+`);
+}
 function contains(display, x, y) {
   return x >= display.x && y >= display.y && x < display.x + display.width && y < display.y + display.height;
 }
@@ -3236,7 +3745,7 @@ async function target(sessionID, requested) {
   const index = requested ?? current.get(sessionID) ?? 0;
   const display = list[index];
   if (!display)
-    throw new Error(`There is no display ${index}; call list_displays`);
+    throw fail("INVALID_ARGS", `There is no display ${index}; call list_displays`, "no");
   current.set(sessionID, index);
   return { display, index };
 }
@@ -3319,9 +3828,9 @@ async function execute(params, ctx) {
       return ask(["screen"], { action });
     const app = window.process.toLowerCase();
     if (own(window))
-      throw new Error(action === "type" || action === "key" || action === "hold_key" ? "OpenCode is the focused window, so keys would go into it. Click the field in the app first, in the same call: actions [left_click, type], or use set_value" : "OpenCode cannot control its own window");
-    if (TERMINALS.has(app) && (!POINTER_ONLY.includes(action) || modifiers))
-      throw new Error(`${window.process} is a terminal or IDE: only plain clicks and scrolling are allowed there. Use the shell or edit tools instead`);
+      throw fail("BLOCKED", action === "type" || action === "key" || action === "hold_key" ? "OpenCode is the focused window, so keys would go into it. Click the field in the app first, in the same call: actions [left_click, type], or use set_value" : "OpenCode cannot control its own window", "no");
+    if (TERMINALS.has(app) && !ARRANGE.has(action) && (!POINTER_ONLY.includes(action) || modifiers))
+      throw fail("BLOCKED", `${window.process} is a terminal or IDE: only plain clicks, scrolling and arranging its window are allowed there. Use the shell or edit tools instead`, "no");
     workingIn.set(ctx.sessionID, window.hwnd);
     return ask([app], { action, app: window.process, title: window.title });
   };
@@ -3331,11 +3840,11 @@ async function execute(params, ctx) {
   const output = [];
   const refs = book(ctx.sessionID);
   let background = false;
-  const noCursor = (what) => new Error(`${what}, and "Don't use my cursor" is on in Settings, so the mouse is never moved. Use click_element, set_value, type with ref, or key instead`);
+  const noCursor = (what) => fail("BLOCKED", `${what}, and "Don't use my cursor" is on in Settings, so the mouse is never moved. Use click_element, set_value, type with ref, or key instead`, "no");
   const entryFor = (ref) => {
     const entry = refs.get(ref);
     if (!entry)
-      throw new Error(`There is no element [${ref}]; take a screenshot or read_window for current refs`);
+      throw fail("STALE_REF", `There is no element [${ref}]; take a screenshot or read_window for current refs`);
     return entry;
   };
   const show = (entry, display) => line(entry, { toFrame: (x, y) => toFrame(display, x, y) }, true);
@@ -3346,6 +3855,7 @@ async function execute(params, ctx) {
       hwnd: item.win,
       rid: item.rid,
       name: item.name,
+      ctx: item.ctx,
       x: item.x,
       y: item.y,
       w: item.w,
@@ -3356,7 +3866,7 @@ async function execute(params, ctx) {
       dh: display.height
     });
     if (!spot.found)
-      throw new Error(`${show(entry, display)} is no longer on screen${spot.closed ? " (its window closed)" : ""}; look again`);
+      throw fail("STALE_REF", `${show(entry, display)} is no longer on screen${spot.closed ? " (its window closed)" : ""}; look again`);
     return { ...spot, cx: spot.x + Math.floor(spot.w / 2), cy: spot.y + Math.floor(spot.h / 2) };
   };
   const pointOf = async (display, ref, coordinate, name = "coordinate") => {
@@ -3368,7 +3878,7 @@ async function execute(params, ctx) {
     const entry = entryFor(ref);
     const spot = await locate(entry, display);
     if (spot.covered)
-      throw new Error(`${show(entry, display)} is covered by ${describeWindow(spot.top)}, so the mouse would land there. Use click_element (it presses controls in the background) or switch_window first`);
+      throw fail("COVERED", `${show(entry, display)} is covered by ${describeWindow(spot.top)}, so the mouse would land there. Use click_element (it presses controls in the background) or switch_window first`, "no");
     return { x: spot.cx, y: spot.cy };
   };
   const hit = async (x, y) => {
@@ -3402,10 +3912,44 @@ async function execute(params, ctx) {
       match = find(filter(screen.entries), query, screen.map.target?.hwnd);
     }
     if (!match.entry && match.candidates.length > 1)
-      throw new Error(`"${query}" matches ${match.candidates.length} elements; pass ref to pick one:
+      throw fail("AMBIGUOUS_TARGET", `"${query}" matches ${match.candidates.length} elements; pass ref to pick one:
 ${match.candidates.slice(0, 8).map((entry) => show(entry, display)).join(`
-`)}`);
+`)}`, "no");
     return match.entry;
+  };
+  const windowNamed = (text) => call("find_window", {
+    query: text,
+    hwnd: workingIn.get(ctx.sessionID),
+    skip: "opencode",
+    pids: PIDS
+  });
+  const placeOf = (window, list) => {
+    if (!window.bounds)
+      return "";
+    const b = window.bounds;
+    const home = list.findIndex((item) => contains(item, b.x + b.w / 2, b.y + b.h / 2));
+    const screen = list[home];
+    if (!screen)
+      return "";
+    const { scale } = frame2(screen);
+    return ` display ${home} @${toFrame(screen, b.x, b.y)} ${Math.round(b.w * scale)}x${Math.round(b.h * scale)}`;
+  };
+  const groupNamed = async (within, hwnd, display) => {
+    const known = groupIds.get(ctx.sessionID)?.groups.get(within.trim());
+    if (known)
+      return known;
+    const map = await call("see", { ...seeWindow(hwnd, display), limit: 3000, budget: 2500, ocr: "off" }, 15000);
+    const wanted = fold(within);
+    const groups = map.groups ?? [];
+    const exact = groups.filter((group) => fold(group.name) === wanted);
+    const found = exact.length ? exact : groups.filter((group) => fold(group.name).includes(wanted));
+    if (found.length === 0)
+      throw fail("NOT_FOUND", `No group named "${within}" in ${describeWindow(map.target)}; read_window skeleton lists them`);
+    if (found.length > 1)
+      throw fail("AMBIGUOUS_TARGET", `"${within}" names ${found.length} groups; pass one id as within:
+${found.slice(0, 8).map((group) => `${groupId(ctx.sessionID, group)} "${group.name}" @${toFrame(display, group.x, group.y)}`).join(`
+`)}`, "no");
+    return found[0];
   };
   const run2 = async (step) => {
     if (step.device !== undefined)
@@ -3467,16 +4011,11 @@ ${match.candidates.slice(0, 8).map((entry) => show(entry, display)).join(`
       case "read_window": {
         await ask(["screen"], { action });
         const hwnd = step.coordinate ? (await at(...Object.values(toPhysical2(display, step.coordinate))))?.hwnd : workingIn.get(ctx.sessionID);
+        const group = step.within ? await groupNamed(step.within, hwnd, display) : undefined;
         const map = await call("see", {
-          scope: "window",
-          hwnd,
-          skip: "opencode",
-          pids: PIDS,
-          ocr: "auto",
-          x: display.x,
-          y: display.y,
-          width: display.width,
-          height: display.height
+          ...seeWindow(group?.win ?? hwnd, display),
+          ...group ? { cx: group.x, cy: group.y, cw: group.w, ch: group.h } : {},
+          ...step.skeleton ? { limit: 3000, budget: 2500, ocr: "off" } : {}
         }, 15000);
         if (map.target && !own(map.target))
           workingIn.set(ctx.sessionID, map.target.hwnd);
@@ -3487,9 +4026,11 @@ ${match.candidates.slice(0, 8).map((entry) => show(entry, display)).join(`
         const home = Math.max(0, list.findIndex((item) => contains(item, cx, cy)));
         const screen = list[home] ?? display;
         current.set(ctx.sessionID, home);
+        if (step.skeleton)
+          return skeleton(ctx.sessionID, map, entries, screen);
         const wanted = step.text ? fold(step.text) : "";
         const shown = wanted ? entries.filter((entry) => fold(`${entry.item.name} ${entry.item.value ?? ""} ${entry.item.ctx}`).includes(wanted) || like(fold(entry.item.name), wanted)) : entries;
-        const window = describeWindow(map.target);
+        const window = `${describeWindow(map.target)}${group ? ` > "${group.name}"` : ""}`;
         if (shown.length === 0)
           return `${window}: no readable elements${step.text ? ` matching "${step.text}"` : ""}; take a screenshot`;
         return `${window} on display ${home}:
@@ -3498,7 +4039,7 @@ ${format(map, shown, keep(map, shown, WINDOW_LIMIT), { toFrame: (x, y) => toFram
       case "click_element": {
         await ask(["screen"], { action });
         if (step.ref === undefined && !step.text)
-          throw new Error("click_element needs ref or text");
+          throw fail("INVALID_ARGS", "click_element needs ref or text", "no");
         let entry = step.ref !== undefined ? entryFor(step.ref) : await named(step.text, display, index);
         const hwnd = workingIn.get(ctx.sessionID);
         if (!entry && hwnd) {
@@ -3515,18 +4056,11 @@ ${format(map, shown, keep(map, shown, WINDOW_LIMIT), { toFrame: (x, y) => toFram
             entry = await named(step.text, display, index);
         }
         if (!entry)
-          throw new Error(`No element matching "${step.text}" on screen; take a screenshot`);
+          throw fail("NOT_FOUND", `No element matching "${step.text}" on screen; take a screenshot`);
         const item = entry.item;
         if (item.state.includes("disabled"))
-          throw new Error(`${show(entry, display)} is disabled`);
-        const activate = (force) => call("invoke", {
-          hwnd: item.win,
-          rid: item.rid,
-          name: item.name,
-          x: item.x + item.w / 2,
-          y: item.y + item.h / 2,
-          force
-        }, 6000).catch(() => ({ invoked: false, via: undefined, mouse: false }));
+          throw fail("DISABLED", `${show(entry, display)} is disabled; wait_for what enables it, or look again`);
+        const activate = (force) => call("invoke", { ...located(item), force }, 6000).catch(() => ({ invoked: false, via: undefined, mouse: false }));
         let mouse = false;
         if (item.src === "uia") {
           await guard("left_click", await windowOf(entry));
@@ -3548,7 +4082,7 @@ ${format(map, shown, keep(map, shown, WINDOW_LIMIT), { toFrame: (x, y) => toFram
             return `pressed ${show(entry, display)} (${activated.via}; it is covered, so the app may not react as to a click)`;
         }
         if (spot.covered)
-          throw new Error(`${show(entry, display)} has no accessible action and ${describeWindow(spot.top)} covers it, so a mouse click would hit that instead. Use switch_window first`);
+          throw fail("COVERED", `${show(entry, display)} has no accessible action and ${describeWindow(spot.top)} covers it, so a mouse click would hit that instead. Use switch_window first`, "no");
         await guard("left_click", spot.top ?? await at(spot.cx, spot.cy));
         await call("click", { x: spot.cx, y: spot.cy, button: "left", count: 1 });
         return `clicked ${show(entry, display)} with the mouse`;
@@ -3556,30 +4090,22 @@ ${format(map, shown, keep(map, shown, WINDOW_LIMIT), { toFrame: (x, y) => toFram
       case "set_value": {
         await ask(["screen"], { action });
         if (step.value === undefined)
-          throw new Error("set_value needs value");
+          throw fail("INVALID_ARGS", "set_value needs value", "no");
         if (step.ref === undefined && !step.text)
-          throw new Error("set_value needs ref or text");
+          throw fail("INVALID_ARGS", "set_value needs ref or text", "no");
         const entry = step.ref !== undefined ? entryFor(step.ref) : await named(step.text, display, index, (e) => e.item.src === "uia" && SETTABLE.has(e.item.type));
         if (!entry)
-          throw new Error(`No field matching "${step.text}"; take a screenshot`);
+          throw fail("NOT_FOUND", `No field matching "${step.text}"; take a screenshot`);
         if (entry.item.src !== "uia")
-          throw new Error(`${show(entry, display)} is text on screen, not a field: click it and type instead`);
+          throw fail("UNSUPPORTED", `${show(entry, display)} is text on screen, not a field: click it and type instead`, "no");
         await guard("type", await windowOf(entry));
-        const item = entry.item;
-        const result = await call("set_value", {
-          hwnd: item.win,
-          rid: item.rid,
-          name: item.name,
-          x: item.x + item.w / 2,
-          y: item.y + item.h / 2,
-          value: step.value
-        }, 1e4);
+        const result = await call("set_value", { ...located(entry.item), value: step.value }, 1e4);
         return `set ${show(entry, display)} -> ${result}`;
       }
       case "wait_for": {
         await ask(["screen"], { action });
         if (!step.text)
-          throw new Error("wait_for needs text");
+          throw fail("INVALID_ARGS", "wait_for needs text", "no");
         const seconds = Math.min(Math.max(step.duration ?? 10, 0.1), 60);
         const result = await call("wait_for", {
           query: step.text,
@@ -3595,7 +4121,7 @@ ${format(map, shown, keep(map, shown, WINDOW_LIMIT), { toFrame: (x, y) => toFram
         }, seconds * 1000 + 15000);
         const took = (result.ms / 1000).toFixed(1);
         if (!result.met)
-          throw new Error(`"${step.text}" ${step.gone ? "was still there" : "did not appear"} after ${seconds}s`);
+          throw fail("TIMEOUT", `"${step.text}" ${step.gone ? "was still there" : "did not appear"} after ${seconds}s`, "safe");
         return step.gone ? `"${step.text}" went away after ${took}s` : `found ${result.via} after ${took}s`;
       }
       case "watch": {
@@ -3640,7 +4166,7 @@ ${fresh.map((line2) => `- ${line2}`).join(`
       }
       case "switch_window": {
         if (!step.text)
-          throw new Error("switch_window needs the window title or app name in text");
+          throw fail("INVALID_ARGS", "switch_window needs the window title or app name in text", "no");
         await ask(["screen"], { action });
         const window = await call("switch", {
           query: step.text,
@@ -3705,14 +4231,13 @@ ${fresh.map((line2) => `- ${line2}`).join(`
       case "key":
       case "hold_key": {
         if (!step.text)
-          throw new Error(`${action} needs text`);
+          throw fail("INVALID_ARGS", `${action} needs text`, "no");
         if (step.ref !== undefined && background) {
           const entry = entryFor(step.ref);
           if (entry.item.src !== "uia")
             throw noCursor(`${show(entry, display)} is text on screen, not a field`);
           await guard("type", await windowOf(entry));
-          const item = entry.item;
-          await call("focus", { hwnd: item.win, rid: item.rid, name: item.name, x: item.x + item.w / 2, y: item.y + item.h / 2 }, 6000);
+          await call("focus", located(entry.item), 6000);
           await new Promise((resolve) => setTimeout(resolve, 60));
         } else if (step.ref !== undefined) {
           const point = await pointOf(display, step.ref, undefined);
@@ -3739,7 +4264,7 @@ ${fresh.map((line2) => `- ${line2}`).join(`
       }
       case "open_application": {
         if (!step.text)
-          throw new Error("open_application needs the app name in text");
+          throw fail("INVALID_ARGS", "open_application needs the app name in text", "no");
         await ask([`open:${step.text.toLowerCase()}`], { action, app: step.text });
         const opened = await call("open", { name: step.text });
         workingIn.delete(ctx.sessionID);
@@ -3752,10 +4277,102 @@ ${fresh.map((line2) => `- ${line2}`).join(`
       case "write_clipboard": {
         await ask(["clipboard"], { action });
         await call("clipboard_set", { text: step.text ?? "" });
-        return "clipboard updated";
+        return step.text ? "clipboard updated" : "clipboard cleared";
+      }
+      case "inspect":
+      case "expand":
+      case "collapse":
+      case "select":
+      case "focus":
+      case "scroll_to": {
+        await ask(["screen"], { action });
+        if (step.ref === undefined && !step.text)
+          throw fail("INVALID_ARGS", `${action} needs ref or text`, "no");
+        const entry = step.ref !== undefined ? entryFor(step.ref) : await named(step.text, display, index, (e) => e.item.src === "uia");
+        const permit = async (window) => {
+          if (action !== "inspect")
+            await guard(action === "scroll_to" ? "scroll" : "left_click", window);
+        };
+        let label;
+        let result;
+        if (entry) {
+          if (entry.item.src !== "uia")
+            throw fail("UNSUPPORTED", `${show(entry, display)} is text read from the screen, not a control; ${action} needs a control`, "no");
+          await permit(await windowOf(entry));
+          label = show(entry, display);
+          result = await call(action === "focus" ? "focus" : "element", { ...located(entry.item), do: action }, 1e4);
+        } else {
+          const hwnd = workingIn.get(ctx.sessionID);
+          if (!hwnd || action !== "scroll_to" && action !== "inspect")
+            throw fail("NOT_FOUND", `No control matching "${step.text}" on screen; take a screenshot`);
+          await permit(refs.windows.get(hwnd) ?? await windowNamed(undefined));
+          label = `"${step.text}"`;
+          result = await call("element", { hwnd, name: step.text, any: true, do: action }, 1e4);
+        }
+        if (action === "inspect")
+          return inspection(label, result, display);
+        if (action === "focus")
+          return `${result ? "focused" : "asked the app to focus"} ${label}`;
+        if (typeof result === "object" && result && "mouse" in result) {
+          if (entry && !background)
+            return run2({ ...step, action: "click_element", ref: entry.ref, text: undefined });
+          const forced = await call("element", entry ? { ...located(entry.item), do: action, force: true } : { hwnd: workingIn.get(ctx.sessionID), name: step.text, any: true, do: action, force: true }, 1e4);
+          return `${action} ${label} -> ${String(forced)} (through accessibility, so this older app may not react as to a click)`;
+        }
+        return `${action} ${label} -> ${String(result)}`;
+      }
+      case "list_windows": {
+        await ask(["screen"], { action });
+        const [list, all] = await Promise.all([
+          call("windows", { skip: "opencode", pids: PIDS }),
+          screens(true)
+        ]);
+        if (list.length === 0)
+          return "No app windows are open";
+        const working = workingIn.get(ctx.sessionID);
+        return list.map((window) => `- ${describeWindow(window)} ${window.state}${window.front ? " front" : ""}${window.hwnd === working ? " (working in)" : ""}${placeOf(window, all)}`).join(`
+`);
+      }
+      case "minimize_window":
+      case "maximize_window":
+      case "restore_window":
+      case "close_window":
+      case "move_window": {
+        await ask(["screen"], { action });
+        const window = await windowNamed(step.text);
+        await guard(action, window);
+        const name = describeWindow(window);
+        if (action === "close_window") {
+          const result = await call("window", { hwnd: window.hwnd, do: "close" }, 8000);
+          if (!result.closed)
+            return `asked ${name} to close; it is still open, most likely asking to save. Look at it before going on`;
+          if (workingIn.get(ctx.sessionID) === window.hwnd)
+            workingIn.delete(ctx.sessionID);
+          return `closed ${name}`;
+        }
+        const verb = action.replace("_window", "");
+        let bounds = {};
+        if (action === "move_window") {
+          const region = step.region;
+          if (region?.length === 4) {
+            const a = toPhysical2(display, [region[0], region[1]], "region");
+            const b = toPhysical2(display, [region[2], region[3]], "region");
+            bounds = {
+              x: Math.min(a.x, b.x),
+              y: Math.min(a.y, b.y),
+              width: Math.abs(b.x - a.x),
+              height: Math.abs(b.y - a.y)
+            };
+          } else if (step.coordinate)
+            bounds = { ...toPhysical2(display, step.coordinate), width: 0, height: 0 };
+          else
+            throw fail("INVALID_ARGS", "move_window needs region [x0, y0, x1, y1] for its new bounds, or coordinate [x, y] for its new top-left corner", "no");
+        }
+        const placed = await call("window", { hwnd: window.hwnd, do: verb, ...bounds }, 8000);
+        return `${verb}d ${name}: now ${placed.state}${placeOf(placed, await screens(true))}`;
       }
     }
-    throw new Error(`Unknown action: ${String(action)}`);
+    throw fail("INVALID_ARGS", `Unknown action: ${String(action)}`, "no");
   };
   const steps = [params, ...params.actions ?? []];
   const failure = await (async () => {
@@ -3763,7 +4380,7 @@ ${fresh.map((line2) => `- ${line2}`).join(`
     for (const [i, step] of steps.entries()) {
       if (ctx.aborted())
         return "aborted";
-      const result = await run2(step).then((text) => ({ text }), (error) => ({ error: error instanceof Error ? error.message : String(error) }));
+      const result = await run2(step).then((text) => ({ text }), (error) => ({ error: format2(classify(error, step.action)) }));
       if (rejection)
         return "rejected";
       if (step.device === undefined) {
@@ -5862,7 +6479,7 @@ var supportedEols = [`
 `];
 
 // node_modules/jsonc-parser/lib/esm/impl/format.js
-function format2(documentText, range, options) {
+function format3(documentText, range, options) {
   let initialIndentLevel;
   let formatText;
   let formatTextStart;
@@ -6642,7 +7259,7 @@ function withFormatting(text, edit, options) {
       end++;
     }
   }
-  const edits = format2(newText, { offset: begin, length: end - begin }, { ...options.formattingOptions, keepLines: false });
+  const edits = format3(newText, { offset: begin, length: end - begin }, { ...options.formattingOptions, keepLines: false });
   for (let i = edits.length - 1;i >= 0; i--) {
     const edit = edits[i];
     newText = applyEdit(newText, edit);
@@ -6779,6 +7396,7 @@ var KEYS = [
   "instructions",
   "experimental",
   "provider",
+  "providers",
   "disabled_providers",
   "websearch",
   "warming",

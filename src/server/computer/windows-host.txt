@@ -124,6 +124,10 @@ namespace OpencodeComputer {
         case "wait_for": return WaitFor(r);
         case "switch": return Switch(Str(r, "query"), Str(r, "skip"), Pids(r));
         case "invoke": return Invoke(r);
+        case "element": return OnWorker(() => Element(r), 8000, "TIMEOUT: the app did not answer in time");
+        case "windows": return ListWindows(r);
+        case "find_window": return FindWindow(r);
+        case "window": return WindowOp(r);
         case "clipboard_get": return Clipboard.ContainsText() ? Clipboard.GetText() : "";
         case "clipboard_set": {
           var text = Str(r, "text");
@@ -366,13 +370,12 @@ namespace OpencodeComputer {
     static object Invoke(Dictionary<string, object> r) {
       int x = Int(r, "x"), y = Int(r, "y");
       var hwnd = new IntPtr(Convert.ToInt64(r.ContainsKey("hwnd") && r["hwnd"] != null ? r["hwnd"] : 0));
-      var name = Str(r, "name") ?? "";
       object result = null;
       Exception failure = null;
       // With a known window, never fall back to the point: whatever is on top there may be another app.
       var worker = new Thread(() => {
         try {
-          var found = ByRid(hwnd, Str(r, "rid")) ?? Find(hwnd, name, x, y);
+          var found = Refind(r);
           result = found == null && hwnd != IntPtr.Zero
             ? new Dictionary<string, object> { { "invoked", false } }
             : Activate(found, x, y, Bool(r, "force"));

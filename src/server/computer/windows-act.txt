@@ -1,0 +1,305 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Windows.Automation;
+
+namespace OpencodeComputer {
+  // Element verbs beyond a click (expand, collapse, select, scroll into view, inspect), window management, and the
+  // identity check that keeps an old ref from landing on a different control that took its place.
+  public static partial class Host {
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT value, int size);
+
+    // A control whose runtime id no longer resolves was either rebuilt by its app (new id, same control) or removed,
+    // with a same-named control now in its place: after a row is deleted, the next row's "Delete" slides up to the
+    // same spot. A name match only counts as the same control when it sits where the old one was and inside the same
+    // named group; anything else is reported as gone instead of pressed.
+    static AutomationElement Refind(IntPtr hwnd, string rid, string name, string ctx, int x, int y, int w, int h) {
+      var found = ByRid(hwnd, rid);
+      if (found != null) return found;
+      var near = Find(hwnd, name ?? "", x, y);
+      if (near == null || string.IsNullOrEmpty(rid)) return near;
+      var rect = near.Current.BoundingRectangle;
+      if (rect.IsEmpty) return null;
+      if (Math.Abs(rect.X + rect.Width / 2 - x) > Math.Max(24, w) || Math.Abs(rect.Y + rect.Height / 2 - y) > Math.Max(16, h)) return null;
+      if (!string.IsNullOrEmpty(ctx) && GroupOf(near, hwnd) != ctx) return null;
+      return near;
+    }
+
+    // The same lookup for requests that give an element's centre and size.
+    static AutomationElement Refind(Dictionary<string, object> r) {
+      return Refind(Hwnd(r, "hwnd"), Str(r, "rid"), Str(r, "name"), Str(r, "ctx"), Int(r, "x"), Int(r, "y"), Int(r, "w"), Int(r, "h"));
+    }
+
+    // The group the screen map files an element under: its innermost named container or row, or the one around that
+    // when the innermost is named after the element itself (a cell "Edit" around an "Edit" button).
+    static string GroupOf(AutomationElement element, IntPtr hwnd) {
+      var title = TitleOf(hwnd);
+      var own = Clean(element.Current.Name);
+      var walker = TreeWalker.ControlViewWalker;
+      string first = null;
+      var node = walker.GetParent(element);
+      for (var depth = 0; node != null && depth < 40; depth++) {
+        if ((long)node.Current.NativeWindowHandle == hwnd.ToInt64()) break;
+        var type = Kind(node);
+        var name = Clean(node.Current.Name);
+        if ((Containers.Contains(type) || Rows.Contains(type)) && name.Length > 0 && name.Length <= 80 && name != title) {
+          if (first != null || name != own) return name;
+          first = name;
+        }
+        node = walker.GetParent(node);
+      }
+      return first ?? "";
+    }
+
+    // Any control with this exact name in the window, on screen or scrolled out of view.
+    static AutomationElement FindAny(IntPtr hwnd, string name) {
+      if (hwnd == IntPtr.Zero || name.Length == 0 || !IsWindow(hwnd)) return null;
+      return Find(hwnd, name, 0, 0) ?? AutomationElement.FromHandle(hwnd).FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, name));
+    }
+
+    static string Kind(AutomationElement element) {
+      return element.Current.ControlType.ProgrammaticName.Replace("ControlType.", "").ToLowerInvariant();
+    }
+
+    static object Element(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) throw new Exception("STALE_REF: its window closed; look again");
+      var any = Bool(r, "any");
+      var element = any ? FindAny(hwnd, Str(r, "name") ?? "") : Refind(r);
+      if (element == null)
+        throw new Exception(any ? "NOT_FOUND: nothing named \"" + Str(r, "name") + "\" in this app" : "STALE_REF: that element is no longer there; look again");
+      var verb = Str(r, "do");
+      if (verb == "inspect") return Inspect(element);
+      if (!element.Current.IsEnabled) throw new Exception("DISABLED: that element is disabled");
+      // Classic Win32 and WinForms trees and lists change through accessibility without telling the app: a collapse
+      // sends no TVN_ITEMEXPANDED and a list selection no change event. Those take the keys or the click a person uses.
+      var classic = element.Current.FrameworkId == "Win32" || element.Current.FrameworkId == "WinForm";
+      object pattern;
+      switch (verb) {
+        case "expand":
+        case "collapse": {
+          if (!element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern))
+            throw new Exception("UNSUPPORTED: this element does not expand or collapse; click it instead");
+          var expand = (ExpandCollapsePattern)pattern;
+          var wanted = verb == "expand" ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+          if (expand.Current.ExpandCollapseState == wanted) return wanted.ToString().ToLowerInvariant() + " already";
+          var via = "";
+          if (classic && element.Current.ControlType == ControlType.TreeItem && Front(hwnd)) {
+            try { element.SetFocus(); } catch { }
+            Thread.Sleep(40);
+            // Right opens a closed node and Left closes an open one; the window must be in front to get them.
+            if (GetForegroundWindow() == hwnd && element.Current.HasKeyboardFocus) {
+              var key = verb == "expand" ? (ushort)0x27 : (ushort)0x25;
+              Key(key, false);
+              Key(key, true);
+              via = " (keyboard)";
+            }
+          }
+          if (via.Length == 0) { if (verb == "expand") expand.Expand(); else expand.Collapse(); }
+          var clock = Stopwatch.StartNew();
+          while (expand.Current.ExpandCollapseState != wanted && clock.ElapsedMilliseconds < 800) Thread.Sleep(20);
+          return expand.Current.ExpandCollapseState.ToString().ToLowerInvariant() + via;
+        }
+        case "select": {
+          if (classic && element.Current.ControlType == ControlType.ListItem && !Bool(r, "force"))
+            return new Dictionary<string, object> { { "mouse", true } };
+          if (!element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern))
+            throw new Exception("UNSUPPORTED: this element cannot be selected; click it instead");
+          var item = (SelectionItemPattern)pattern;
+          item.Select();
+          return item.Current.IsSelected ? "selected" : "select requested, the app did not report it selected";
+        }
+        case "scroll_to": {
+          if (!element.TryGetCurrentPattern(ScrollItemPattern.Pattern, out pattern))
+            throw new Exception("UNSUPPORTED: this element cannot be scrolled into view; scroll its list instead");
+          ((ScrollItemPattern)pattern).ScrollIntoView();
+          Thread.Sleep(80);
+          return element.Current.IsOffscreen ? "scroll requested, it is still off screen" : "in view";
+        }
+        default: throw new Exception("INVALID_ARGS: unknown element operation " + verb);
+      }
+    }
+
+    // Everything accessibility knows about one element, including the actions it supports.
+    static object Inspect(AutomationElement element) {
+      var current = element.Current;
+      var bounds = current.BoundingRectangle;
+      var info = new Dictionary<string, object> {
+        { "type", Kind(element) }, { "name", Clean(current.Name) }, { "automation_id", current.AutomationId ?? "" },
+        { "class", current.ClassName ?? "" }, { "framework", current.FrameworkId ?? "" }, { "help", Clean(current.HelpText) },
+        { "enabled", current.IsEnabled }, { "focused", current.HasKeyboardFocus }, { "offscreen", current.IsOffscreen },
+        { "password", current.IsPassword },
+      };
+      if (!bounds.IsEmpty) info["rect"] = Rect(new Rectangle((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height));
+      var actions = new List<string>();
+      object pattern;
+      if (element.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) actions.Add("click_element");
+      if (element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) {
+        actions.Add("set_value true/false");
+        info["toggle"] = ((TogglePattern)pattern).Current.ToggleState.ToString().ToLowerInvariant();
+      }
+      if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern)) {
+        actions.Add("select");
+        info["selected"] = ((SelectionItemPattern)pattern).Current.IsSelected;
+      }
+      if (element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern)) {
+        actions.Add("expand");
+        actions.Add("collapse");
+        info["expand"] = ((ExpandCollapsePattern)pattern).Current.ExpandCollapseState.ToString().ToLowerInvariant();
+      }
+      if (element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)) {
+        var value = (ValuePattern)pattern;
+        if (!value.Current.IsReadOnly) actions.Add("set_value");
+        info["readonly"] = value.Current.IsReadOnly;
+        if (!current.IsPassword) info["value"] = Clean(value.Current.Value);
+      }
+      if (element.TryGetCurrentPattern(RangeValuePattern.Pattern, out pattern)) {
+        var range = (RangeValuePattern)pattern;
+        actions.Add("set_value number");
+        info["range"] = new Dictionary<string, object> {
+          { "value", range.Current.Value }, { "min", range.Current.Minimum }, { "max", range.Current.Maximum }, { "step", range.Current.SmallChange },
+        };
+      }
+      if (element.TryGetCurrentPattern(ScrollItemPattern.Pattern, out pattern)) actions.Add("scroll_to");
+      if (element.TryGetCurrentPattern(ScrollPattern.Pattern, out pattern)) {
+        var scroll = (ScrollPattern)pattern;
+        actions.Add("scroll");
+        info["scroll"] = new Dictionary<string, object> {
+          { "vertical", scroll.Current.VerticallyScrollable ? Math.Round(scroll.Current.VerticalScrollPercent) : -1 },
+          { "horizontal", scroll.Current.HorizontallyScrollable ? Math.Round(scroll.Current.HorizontalScrollPercent) : -1 },
+        };
+      }
+      if (element.TryGetCurrentPattern(SelectionPattern.Pattern, out pattern))
+        info["selection"] = ((SelectionPattern)pattern).Current.GetSelection().Cast<AutomationElement>().Take(20).Select(e => Clean(e.Current.Name)).ToArray();
+      if (current.IsKeyboardFocusable) actions.Add("focus");
+      if (!current.IsPassword && element.TryGetCurrentPattern(TextPattern.Pattern, out pattern)) {
+        try { info["text"] = ((TextPattern)pattern).DocumentRange.GetText(4000); } catch { }
+      }
+      info["actions"] = actions.ToArray();
+      var children = element.FindAll(TreeScope.Children, Condition.TrueCondition);
+      info["children_count"] = children.Count;
+      info["children"] = children.Cast<AutomationElement>().Take(15).Select(c => Kind(c) + " \"" + Cut(Clean(c.Current.Name)) + "\"").ToArray();
+      return info;
+    }
+
+    // Windows a person could switch to: visible, titled, not a tool window, not cloaked, not OpenCode's own.
+    static bool Listed(IntPtr hwnd, string skip, HashSet<int> pids) {
+      if (!IsWindowVisible(hwnd) || GetWindowText(hwnd, new StringBuilder(2), 2) == 0 || (GetWindowLong(hwnd, -20) & 0x80) != 0) return false;
+      int cloaked;
+      if (DwmGetWindowAttribute(hwnd, 14, out cloaked, 4) == 0 && cloaked != 0) return false;
+      var cls = ClassOf(hwnd);
+      if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd") return false;
+      return !Own(hwnd, skip, pids);
+    }
+
+    // The best window for a name: an exact process name first, then a title match. A window that is still opening is
+    // waited for up to `wait` ms.
+    static IntPtr Best(string query, string skip, HashSet<int> pids, int wait) {
+      var wanted = Fold(query);
+      if (wanted.Length == 0) throw new Exception("INVALID_ARGS: a window title or app name is required");
+      skip = (skip ?? "").ToLowerInvariant();
+      Func<IntPtr, int> rank = hwnd => {
+        uint pid;
+        GetWindowThreadProcessId(hwnd, out pid);
+        var process = Fold(ProcessName(pid));
+        var title = Fold(TitleOf(hwnd));
+        if (process == wanted) return 0;
+        if (title == wanted) return 1;
+        if (title.StartsWith(wanted)) return 2;
+        if (title.Contains(wanted)) return 3;
+        if (process.Contains(wanted)) return 4;
+        return 9;
+      };
+      var clock = Stopwatch.StartNew();
+      while (true) {
+        var candidates = new List<IntPtr>();
+        EnumWindows((hwnd, data) => { if (Listed(hwnd, skip, pids)) candidates.Add(hwnd); return true; }, IntPtr.Zero);
+        var best = candidates.Where(h => rank(h) < 9).OrderBy(rank).FirstOrDefault();
+        if (best != IntPtr.Zero || clock.ElapsedMilliseconds > wait) return best;
+        Thread.Sleep(100);
+      }
+    }
+
+    // The visible frame, without the invisible resize borders Windows 10 and later add around GetWindowRect.
+    static Rectangle FrameRect(IntPtr hwnd) {
+      RECT rect;
+      if (DwmGetWindowAttribute(hwnd, 9, out rect, Marshal.SizeOf(typeof(RECT))) == 0)
+        return new Rectangle(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+      return WindowRect(hwnd);
+    }
+
+    static Dictionary<string, object> Placement(IntPtr hwnd) {
+      var info = (Dictionary<string, object>)Window(hwnd);
+      var minimized = IsIconic(hwnd);
+      info["state"] = minimized ? "minimized" : IsZoomed(hwnd) ? "maximized" : "normal";
+      if (!minimized) info["bounds"] = Rect(FrameRect(hwnd));
+      info["front"] = GetForegroundWindow() == hwnd;
+      return info;
+    }
+
+    static object ListWindows(Dictionary<string, object> r) {
+      var skip = (Str(r, "skip") ?? "").ToLowerInvariant();
+      var pids = Pids(r);
+      var list = new List<object>();
+      EnumWindows((hwnd, data) => {
+        if (Listed(hwnd, skip, pids) && list.Count < 60) list.Add(Placement(hwnd));
+        return true;
+      }, IntPtr.Zero);
+      return list.ToArray();
+    }
+
+    // A window by its handle while it is still open, or by a title or app name.
+    static object FindWindow(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      var query = Str(r, "query");
+      if (string.IsNullOrWhiteSpace(query)) {
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) throw new Exception("NOT_FOUND: no app window to work in; pass its title or app name in text");
+        return Placement(hwnd);
+      }
+      var found = Best(query, Str(r, "skip"), Pids(r), 1000);
+      if (found == IntPtr.Zero) throw new Exception("NOT_FOUND: no open window matches \"" + query + "\"; list_windows shows them");
+      return Placement(found);
+    }
+
+    static object WindowOp(Dictionary<string, object> r) {
+      var hwnd = Hwnd(r, "hwnd");
+      if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) throw new Exception("STALE_REF: that window is closed");
+      switch (Str(r, "do")) {
+        case "minimize": ShowWindow(hwnd, 6); break;
+        case "maximize": ShowWindow(hwnd, 3); break;
+        case "restore": ShowWindow(hwnd, 9); break;
+        case "close": {
+          // Asks the app to close the way its close button does, so it can still ask to save first.
+          PostMessage(hwnd, 0x10, IntPtr.Zero, IntPtr.Zero);
+          var clock = Stopwatch.StartNew();
+          while (IsWindow(hwnd) && IsWindowVisible(hwnd) && clock.ElapsedMilliseconds < 1500) Thread.Sleep(50);
+          var closed = !IsWindow(hwnd) || !IsWindowVisible(hwnd);
+          return new Dictionary<string, object> { { "closed", closed } };
+        }
+        case "move": {
+          if (IsIconic(hwnd) || IsZoomed(hwnd)) { ShowWindow(hwnd, 9); Thread.Sleep(150); }
+          var outer = WindowRect(hwnd);
+          var frame = FrameRect(hwnd);
+          int left = frame.X - outer.X, top = frame.Y - outer.Y, right = outer.Right - frame.Right, bottom = outer.Bottom - frame.Bottom;
+          int w = Int(r, "width"), h = Int(r, "height");
+          uint flags = 0x4 | 0x10;
+          if (w <= 0 || h <= 0) { flags |= 0x1; w = frame.Width; h = frame.Height; }
+          if (!SetWindowPos(hwnd, IntPtr.Zero, Int(r, "x") - left, Int(r, "y") - top, w + left + right, h + top + bottom, flags))
+            throw new Exception("BLOCKED: Windows refused to move that window (error " + Marshal.GetLastWin32Error() + "); it may be running as administrator");
+          break;
+        }
+        default: throw new Exception("INVALID_ARGS: unknown window operation " + Str(r, "do"));
+      }
+      Thread.Sleep(150);
+      return Placement(hwnd);
+    }
+  }
+}

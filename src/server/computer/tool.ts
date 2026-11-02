@@ -5,7 +5,8 @@ import { readFile, rm } from "node:fs/promises"
 import path from "node:path"
 import { ComputerAndroid } from "./android.js"
 import { ComputerAurora } from "./aurora.js"
-import { ComputerDriver, type Display, type ScreenMap, type WindowInfo } from "./driver.js"
+import { ComputerDriver, type Display, type Group, type Item, type ScreenMap, type WindowInfo } from "./driver.js"
+import { ComputerErrors, fail } from "./errors.js"
 import { ComputerScreen, type Entry } from "./screen.js"
 
 // The computer tool's actions, independent of the tool host: plugin-mod's index wraps `execute` as an OpenCode tool.
@@ -38,6 +39,18 @@ const ACTIONS = [
   "open_application",
   "read_clipboard",
   "write_clipboard",
+  "inspect",
+  "expand",
+  "collapse",
+  "select",
+  "focus",
+  "scroll_to",
+  "list_windows",
+  "minimize_window",
+  "maximize_window",
+  "restore_window",
+  "close_window",
+  "move_window",
 ] as const
 
 export type Action = (typeof ACTIONS)[number]
@@ -55,10 +68,19 @@ const StepFields = {
   start_coordinate: Schema.optional(Schema.Array(Schema.Number)).annotate({
     description: "[x, y] where left_click_drag starts",
   }),
-  region: Schema.optional(Schema.Array(Schema.Number)).annotate({ description: "[x0, y0, x1, y1] for zoom" }),
+  region: Schema.optional(Schema.Array(Schema.Number)).annotate({
+    description: "[x0, y0, x1, y1]: the area for zoom, or the new bounds for move_window",
+  }),
   text: Schema.optional(Schema.String).annotate({
     description:
-      "type: text to type. key/hold_key: keys like 'ctrl+s' or 'Down Down Enter'. Click actions: modifier keys to hold. click_element/set_value/read_window/wait_for: text to find ('Admin > Login' = the Login inside Admin). switch_window/open_application: app or window name. write_clipboard: text",
+      "type: text to type. key/hold_key: keys like 'ctrl+s' or 'Down Down Enter'. Click actions: modifier keys to hold. click_element/set_value/read_window/wait_for/inspect/expand/collapse/select/focus/scroll_to: text to find ('Admin > Login' = the Login inside Admin). switch_window/open_application and the *_window actions: app or window name (default: the app you are working in). write_clipboard: text",
+  }),
+  skeleton: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "read_window: list the window's named groups (panes, toolbars, lists) with ids and element counts instead of every element. Use it first on busy apps, then read one group with within",
+  }),
+  within: Schema.optional(Schema.String).annotate({
+    description: "read_window: only the elements inside this group, by its id from skeleton (g12) or its name",
   }),
   value: Schema.optional(Schema.String).annotate({
     description: "set_value: the text, the option to pick, true/false for a checkbox, or a number for a slider",
@@ -165,7 +187,14 @@ export const CHANGES_SCREEN = new Set<Action>([
   "wait",
   "open_application",
   "switch_window",
+  "minimize_window",
+  "maximize_window",
+  "restore_window",
+  "close_window",
+  "move_window",
 ])
+// Window moves that are harmless even for terminals and IDEs; closing one could end what runs in it.
+const ARRANGE = new Set<Action>(["minimize_window", "maximize_window", "restore_window", "move_window"])
 // Kinds of element set_value can fill, so "set_value Email" picks the field rather than its label.
 const SETTABLE = new Set(["edit", "combobox", "checkbox", "radiobutton", "slider", "spinner", "document", "list"])
 
@@ -174,6 +203,8 @@ const current = new Map<string, number>()
 // the foreground window is usually the OpenCode chat the user is watching.
 const workingIn = new Map<string, number>()
 const books = new Map<string, ComputerScreen.Refs>()
+// Group ids handed out by read_window skeleton, per session, so within: "g12" names exactly one group.
+const groupIds = new Map<string, { ids: Map<string, string>; groups: Map<string, Group> }>()
 // Text already seen by watch, per session, window and filter, so each watch returns only what is new.
 const watched = new Map<string, Set<string>>()
 let displays: { list: Display[]; at: number } | undefined
@@ -182,6 +213,40 @@ function book(sessionID: string) {
   let refs = books.get(sessionID)
   if (!refs) books.set(sessionID, (refs = new ComputerScreen.Refs()))
   return refs
+}
+
+function groupId(sessionID: string, group: Group) {
+  let known = groupIds.get(sessionID)
+  if (!known) groupIds.set(sessionID, (known = { ids: new Map(), groups: new Map() }))
+  const key = `${group.win}|${group.name}|${group.x},${group.y},${group.w},${group.h}`
+  let id = known.ids.get(key)
+  if (!id) {
+    if (known.ids.size > 2000) known.ids.clear()
+    id = `g${known.groups.size + 1}`
+    known.ids.set(key, id)
+  }
+  known.groups.set(id, group)
+  return id
+}
+
+// What a helper call needs to find an element again: its id, and its name, group and spot for when the id changed.
+function located(item: Item) {
+  return {
+    hwnd: item.win,
+    rid: item.rid,
+    name: item.name,
+    ctx: item.ctx,
+    x: item.x + item.w / 2,
+    y: item.y + item.h / 2,
+    w: item.w,
+    h: item.h,
+  }
+}
+
+type Placed = WindowInfo & {
+  state: "normal" | "minimized" | "maximized"
+  bounds?: { x: number; y: number; w: number; h: number }
+  front: boolean
 }
 
 async function screens(refresh = false) {
@@ -213,6 +278,172 @@ function toFrame(display: Display, x: number, y: number) {
   return `${Math.round((x - display.x) * scale)},${Math.round((y - display.y) * scale)}`
 }
 
+// A "see" request for one app window: the working one, or the topmost app when there is none.
+function seeWindow(hwnd: number | undefined, display: Display) {
+  return {
+    scope: "window",
+    hwnd,
+    skip: "opencode",
+    pids: PIDS,
+    ocr: "auto",
+    x: display.x,
+    y: display.y,
+    width: display.width,
+    height: display.height,
+  }
+}
+
+// The window's named groups as an indented tree, each with an id for read_window within, and how many elements
+// and of which kinds sit inside it. A map of a busy app in a few dozen lines instead of hundreds.
+function skeleton(sessionID: string, map: ScreenMap, entries: Entry[], screen: Display) {
+  const { scale } = frame(screen)
+  const centre = (item: Item) => ({ x: item.x + item.w / 2, y: item.y + item.h / 2 })
+  const holds = (group: Group, x: number, y: number) =>
+    x >= group.x && y >= group.y && x < group.x + group.w && y < group.y + group.h
+  type Row = { group: Group; inside: Entry[]; children: Row[] }
+  const rows: Row[] = (map.groups ?? [])
+    .map((group) => ({
+      group,
+      inside: entries.filter((entry) => {
+        const c = centre(entry.item)
+        return entry.item.win === group.win && holds(group, c.x, c.y)
+      }),
+      children: [],
+    }))
+    .filter((row) => row.inside.length > 0)
+  const area = (row: Row) => row.group.w * row.group.h
+  // Each group's parent is the smallest larger group around it.
+  const roots: Row[] = []
+  for (const row of rows) {
+    const parent = rows
+      .filter(
+        (other) =>
+          other !== row &&
+          other.group.win === row.group.win &&
+          area(other) > area(row) &&
+          holds(other.group, row.group.x + row.group.w / 2, row.group.y + row.group.h / 2),
+      )
+      .sort((a, b) => area(a) - area(b))[0]
+    ;(parent ? parent.children : roots).push(row)
+  }
+  const out: string[] = []
+  const LIMIT = 80
+  const visit = (list: Row[], depth: number) => {
+    for (const row of list.toSorted((a, b) => a.group.y - b.group.y || a.group.x - b.group.x)) {
+      if (out.length >= LIMIT) return
+      const kinds = new Map<string, number>()
+      for (const entry of row.inside) {
+        const kind = entry.item.src === "ocr" ? "text" : entry.item.type
+        kinds.set(kind, (kinds.get(kind) ?? 0) + 1)
+      }
+      const top = [...kinds]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([kind, n]) => `${n} ${kind}`)
+        .join(", ")
+      const g = row.group
+      out.push(
+        `${"  ".repeat(Math.min(depth, 5))}${groupId(sessionID, g)} "${g.name}" @${toFrame(screen, g.x, g.y)} ${Math.round(g.w * scale)}x${Math.round(g.h * scale)}: ${row.inside.length} (${top})`,
+      )
+      visit(row.children, depth + 1)
+    }
+  }
+  visit(roots, 0)
+  const loose = entries.filter((entry) => {
+    const c = centre(entry.item)
+    return !rows.some((row) => row.group.win === entry.item.win && holds(row.group, c.x, c.y))
+  }).length
+  const notes = [
+    `${rows.length} groups, ${entries.length} elements${loose ? `, ${loose} outside any group` : ""}`,
+    ...(rows.length > out.length ? [`${rows.length - out.length} more groups not listed`] : []),
+    ...(map.partial ? ["the app is slow, so the map may be cut short"] : []),
+  ]
+  return `${ComputerScreen.describeWindow(map.target)} skeleton (${notes.join("; ")}). read_window within: "<id>" lists one group:\n${out.map((line) => `  ${line}`).join("\n")}`
+}
+
+type Inspected = {
+  type: string
+  name: string
+  automation_id: string
+  class: string
+  framework: string
+  help: string
+  enabled: boolean
+  focused: boolean
+  offscreen: boolean
+  password: boolean
+  rect?: { x: number; y: number; w: number; h: number }
+  actions: string[]
+  toggle?: string
+  selected?: boolean
+  expand?: string
+  readonly?: boolean
+  value?: string
+  range?: { value: number; min: number; max: number; step: number }
+  scroll?: { vertical: number; horizontal: number }
+  selection?: string[]
+  text?: string
+  children_count: number
+  children: string[]
+}
+
+function inspection(label: string, info: Inspected, display: Display) {
+  const { scale } = frame(display)
+  const ids = [
+    info.automation_id && `id "${info.automation_id}"`,
+    info.class && `class "${info.class}"`,
+    info.framework && `framework ${info.framework}`,
+  ].filter(Boolean)
+  const state = [
+    info.enabled ? "enabled" : "disabled",
+    info.focused && "focused",
+    info.offscreen && "off screen",
+    info.password && "password",
+    info.readonly && "read-only",
+    info.toggle && `toggle ${info.toggle}`,
+    info.selected && "selected",
+    info.expand && info.expand !== "leafnode" && info.expand,
+  ].filter(Boolean)
+  const lines = [
+    label,
+    `${info.type} "${info.name}"${ids.length ? ` · ${ids.join(" · ")}` : ""}`,
+    `state: ${state.join(", ")}`,
+    ...(info.rect
+      ? [
+          contains(display, info.rect.x + info.rect.w / 2, info.rect.y + info.rect.h / 2)
+            ? `at: @${toFrame(display, info.rect.x + info.rect.w / 2, info.rect.y + info.rect.h / 2)} ${Math.round(info.rect.w * scale)}x${Math.round(info.rect.h * scale)}`
+            : "at: outside the current display",
+        ]
+      : []),
+    `actions: ${info.actions.length ? info.actions.join(", ") : "none through accessibility (a real click may still work)"}`,
+    ...(info.value !== undefined ? [`value: "${info.value}"`] : []),
+    ...(info.range
+      ? [`range: ${info.range.value} (${info.range.min} to ${info.range.max}, step ${info.range.step})`]
+      : []),
+    ...(info.scroll
+      ? [
+          `scroll: ${[
+            info.scroll.vertical >= 0 && `vertical ${info.scroll.vertical}%`,
+            info.scroll.horizontal >= 0 && `horizontal ${info.scroll.horizontal}%`,
+          ]
+            .filter(Boolean)
+            .join(", ")}`,
+        ]
+      : []),
+    ...(info.selection?.length ? [`selection: ${info.selection.map((name) => `"${name}"`).join(", ")}`] : []),
+    ...(info.help ? [`help: ${info.help}`] : []),
+    ...(info.children_count
+      ? [
+          `children (${info.children_count}): ${info.children.join(", ")}${info.children_count > info.children.length ? ", ..." : ""}`,
+        ]
+      : []),
+    ...(info.text && info.text !== info.value && info.text !== info.name
+      ? [`text:\n${info.text}${info.text.length >= 4000 ? "\n(cut at 4000 characters)" : ""}`]
+      : []),
+  ]
+  return lines.join("\n")
+}
+
 function contains(display: Display, x: number, y: number) {
   return x >= display.x && y >= display.y && x < display.x + display.width && y < display.y + display.height
 }
@@ -221,7 +452,7 @@ async function target(sessionID: string, requested?: number) {
   const list = await screens(requested !== undefined)
   const index = requested ?? current.get(sessionID) ?? 0
   const display = list[index]
-  if (!display) throw new Error(`There is no display ${index}; call list_displays`)
+  if (!display) throw fail("INVALID_ARGS", `There is no display ${index}; call list_displays`, "no")
   current.set(sessionID, index)
   return { display, index }
 }
@@ -348,14 +579,18 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
     if (!window) return ask(["screen"], { action })
     const app = window.process.toLowerCase()
     if (own(window))
-      throw new Error(
+      throw fail(
+        "BLOCKED",
         action === "type" || action === "key" || action === "hold_key"
           ? "OpenCode is the focused window, so keys would go into it. Click the field in the app first, in the same call: actions [left_click, type], or use set_value"
           : "OpenCode cannot control its own window",
+        "no",
       )
-    if (TERMINALS.has(app) && (!POINTER_ONLY.includes(action) || modifiers))
-      throw new Error(
-        `${window.process} is a terminal or IDE: only plain clicks and scrolling are allowed there. Use the shell or edit tools instead`,
+    if (TERMINALS.has(app) && !ARRANGE.has(action) && (!POINTER_ONLY.includes(action) || modifiers))
+      throw fail(
+        "BLOCKED",
+        `${window.process} is a terminal or IDE: only plain clicks, scrolling and arranging its window are allowed there. Use the shell or edit tools instead`,
+        "no",
       )
     workingIn.set(ctx.sessionID, window.hwnd)
     return ask([app], { action, app: window.process, title: window.title })
@@ -369,13 +604,15 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
   // "Don't use my cursor" from the Mod settings, read once per call so a change applies on the next one.
   let background = false
   const noCursor = (what: string) =>
-    new Error(
+    fail(
+      "BLOCKED",
       `${what}, and "Don't use my cursor" is on in Settings, so the mouse is never moved. Use click_element, set_value, type with ref, or key instead`,
+      "no",
     )
 
   const entryFor = (ref: number) => {
     const entry = refs.get(ref)
-    if (!entry) throw new Error(`There is no element [${ref}]; take a screenshot or read_window for current refs`)
+    if (!entry) throw fail("STALE_REF", `There is no element [${ref}]; take a screenshot or read_window for current refs`)
     return entry
   }
   const show = (entry: Entry, display: Display) =>
@@ -400,6 +637,7 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
       hwnd: item.win,
       rid: item.rid,
       name: item.name,
+      ctx: item.ctx,
       x: item.x,
       y: item.y,
       w: item.w,
@@ -410,7 +648,8 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
       dh: display.height,
     })
     if (!spot.found)
-      throw new Error(
+      throw fail(
+        "STALE_REF",
         `${show(entry, display)} is no longer on screen${spot.closed ? " (its window closed)" : ""}; look again`,
       )
     return { ...spot, cx: spot.x + Math.floor(spot.w / 2), cy: spot.y + Math.floor(spot.h / 2) }
@@ -430,8 +669,10 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
     const entry = entryFor(ref)
     const spot = await locate(entry, display)
     if (spot.covered)
-      throw new Error(
+      throw fail(
+        "COVERED",
         `${show(entry, display)} is covered by ${ComputerScreen.describeWindow(spot.top)}, so the mouse would land there. Use click_element (it presses controls in the background) or switch_window first`,
+        "no",
       )
     return { x: spot.cx, y: spot.cy }
   }
@@ -476,13 +717,62 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
       match = ComputerScreen.find(filter(screen.entries), query, screen.map.target?.hwnd)
     }
     if (!match.entry && match.candidates.length > 1)
-      throw new Error(
+      throw fail(
+        "AMBIGUOUS_TARGET",
         `"${query}" matches ${match.candidates.length} elements; pass ref to pick one:\n${match.candidates
           .slice(0, 8)
           .map((entry) => show(entry, display))
           .join("\n")}`,
+        "no",
       )
     return match.entry
+  }
+
+  // The window an action names in text, or else the app being worked in.
+  const windowNamed = (text: string | undefined) =>
+    ComputerDriver.call<Placed>("find_window", {
+      query: text,
+      hwnd: workingIn.get(ctx.sessionID),
+      skip: "opencode",
+      pids: PIDS,
+    })
+
+  // Where a window is, in the frame of the display it sits on.
+  const placeOf = (window: Placed, list: Display[]) => {
+    if (!window.bounds) return ""
+    const b = window.bounds
+    const home = list.findIndex((item) => contains(item, b.x + b.w / 2, b.y + b.h / 2))
+    const screen = list[home]
+    if (!screen) return ""
+    const { scale } = frame(screen)
+    return ` display ${home} @${toFrame(screen, b.x, b.y)} ${Math.round(b.w * scale)}x${Math.round(b.h * scale)}`
+  }
+
+  // The group within: names, by its skeleton id or by its name among the window's groups now.
+  const groupNamed = async (within: string, hwnd: number | undefined, display: Display) => {
+    const known = groupIds.get(ctx.sessionID)?.groups.get(within.trim())
+    if (known) return known
+    const map = await ComputerDriver.call<ScreenMap>(
+      "see",
+      { ...seeWindow(hwnd, display), limit: 3000, budget: 2500, ocr: "off" },
+      15_000,
+    )
+    const wanted = ComputerScreen.fold(within)
+    const groups = map.groups ?? []
+    const exact = groups.filter((group) => ComputerScreen.fold(group.name) === wanted)
+    const found = exact.length ? exact : groups.filter((group) => ComputerScreen.fold(group.name).includes(wanted))
+    if (found.length === 0)
+      throw fail("NOT_FOUND", `No group named "${within}" in ${ComputerScreen.describeWindow(map.target)}; read_window skeleton lists them`)
+    if (found.length > 1)
+      throw fail(
+        "AMBIGUOUS_TARGET",
+        `"${within}" names ${found.length} groups; pass one id as within:\n${found
+          .slice(0, 8)
+          .map((group) => `${groupId(ctx.sessionID, group)} "${group.name}" @${toFrame(display, group.x, group.y)}`)
+          .join("\n")}`,
+        "no",
+      )
+    return found[0]!
   }
 
   const run = async (step: StepParams): Promise<string> => {
@@ -552,18 +842,14 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
         const hwnd = step.coordinate
           ? (await at(...(Object.values(toPhysical(display, step.coordinate)) as [number, number])))?.hwnd
           : workingIn.get(ctx.sessionID)
+        const group = step.within ? await groupNamed(step.within, hwnd, display) : undefined
         const map = await ComputerDriver.call<ScreenMap>(
           "see",
           {
-            scope: "window",
-            hwnd,
-            skip: "opencode",
-            pids: PIDS,
-            ocr: "auto",
-            x: display.x,
-            y: display.y,
-            width: display.width,
-            height: display.height,
+            ...seeWindow(group?.win ?? hwnd, display),
+            ...(group ? { cx: group.x, cy: group.y, cw: group.w, ch: group.h } : {}),
+            // The skeleton needs the whole window, however busy; it lists groups, not the elements themselves.
+            ...(step.skeleton ? { limit: 3000, budget: 2500, ocr: "off" } : {}),
           },
           15_000,
         )
@@ -578,6 +864,7 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
         )
         const screen = list[home] ?? display
         current.set(ctx.sessionID, home)
+        if (step.skeleton) return skeleton(ctx.sessionID, map, entries, screen)
         const wanted = step.text ? ComputerScreen.fold(step.text) : ""
         const shown = wanted
           ? entries.filter(
@@ -587,14 +874,14 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
                 ) || ComputerScreen.like(ComputerScreen.fold(entry.item.name), wanted),
             )
           : entries
-        const window = ComputerScreen.describeWindow(map.target)
+        const window = `${ComputerScreen.describeWindow(map.target)}${group ? ` > "${group.name}"` : ""}`
         if (shown.length === 0)
           return `${window}: no readable elements${step.text ? ` matching "${step.text}"` : ""}; take a screenshot`
         return `${window} on display ${home}:\n${ComputerScreen.format(map, shown, ComputerScreen.keep(map, shown, WINDOW_LIMIT), { toFrame: (x, y) => toFrame(screen, x, y) }, true)}`
       }
       case "click_element": {
         await ask(["screen"], { action })
-        if (step.ref === undefined && !step.text) throw new Error("click_element needs ref or text")
+        if (step.ref === undefined && !step.text) throw fail("INVALID_ARGS", "click_element needs ref or text", "no")
         let entry = step.ref !== undefined ? entryFor(step.ref) : await named(step.text!, display, index)
         const hwnd = workingIn.get(ctx.sessionID)
         if (!entry && hwnd) {
@@ -611,20 +898,14 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
           }).catch(() => ({ found: false }))
           if (spot.found) entry = await named(step.text!, display, index)
         }
-        if (!entry) throw new Error(`No element matching "${step.text}" on screen; take a screenshot`)
+        if (!entry) throw fail("NOT_FOUND", `No element matching "${step.text}" on screen; take a screenshot`)
         const item = entry.item
-        if (item.state.includes("disabled")) throw new Error(`${show(entry, display)} is disabled`)
+        if (item.state.includes("disabled"))
+          throw fail("DISABLED", `${show(entry, display)} is disabled; wait_for what enables it, or look again`)
         const activate = (force: boolean) =>
           ComputerDriver.call<{ invoked: boolean; via?: string; mouse?: boolean }>(
             "invoke",
-            {
-              hwnd: item.win,
-              rid: item.rid,
-              name: item.name,
-              x: item.x + item.w / 2,
-              y: item.y + item.h / 2,
-              force,
-            },
+            { ...located(item), force },
             6_000,
           ).catch(() => ({ invoked: false, via: undefined, mouse: false }))
         let mouse = false
@@ -651,8 +932,10 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
             return `pressed ${show(entry, display)} (${activated.via}; it is covered, so the app may not react as to a click)`
         }
         if (spot.covered)
-          throw new Error(
+          throw fail(
+            "COVERED",
             `${show(entry, display)} has no accessible action and ${ComputerScreen.describeWindow(spot.top)} covers it, so a mouse click would hit that instead. Use switch_window first`,
+            "no",
           )
         await guard("left_click", spot.top ?? (await at(spot.cx, spot.cy)))
         await ComputerDriver.call("click", { x: spot.cx, y: spot.cy, button: "left", count: 1 })
@@ -660,34 +943,30 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
       }
       case "set_value": {
         await ask(["screen"], { action })
-        if (step.value === undefined) throw new Error("set_value needs value")
-        if (step.ref === undefined && !step.text) throw new Error("set_value needs ref or text")
+        if (step.value === undefined) throw fail("INVALID_ARGS", "set_value needs value", "no")
+        if (step.ref === undefined && !step.text) throw fail("INVALID_ARGS", "set_value needs ref or text", "no")
         const entry =
           step.ref !== undefined
             ? entryFor(step.ref)
             : await named(step.text!, display, index, (e) => e.item.src === "uia" && SETTABLE.has(e.item.type))
-        if (!entry) throw new Error(`No field matching "${step.text}"; take a screenshot`)
+        if (!entry) throw fail("NOT_FOUND", `No field matching "${step.text}"; take a screenshot`)
         if (entry.item.src !== "uia")
-          throw new Error(`${show(entry, display)} is text on screen, not a field: click it and type instead`)
+          throw fail(
+            "UNSUPPORTED",
+            `${show(entry, display)} is text on screen, not a field: click it and type instead`,
+            "no",
+          )
         await guard("type", await windowOf(entry))
-        const item = entry.item
         const result = await ComputerDriver.call<string>(
           "set_value",
-          {
-            hwnd: item.win,
-            rid: item.rid,
-            name: item.name,
-            x: item.x + item.w / 2,
-            y: item.y + item.h / 2,
-            value: step.value,
-          },
+          { ...located(entry.item), value: step.value },
           10_000,
         )
         return `set ${show(entry, display)} -> ${result}`
       }
       case "wait_for": {
         await ask(["screen"], { action })
-        if (!step.text) throw new Error("wait_for needs text")
+        if (!step.text) throw fail("INVALID_ARGS", "wait_for needs text", "no")
         const seconds = Math.min(Math.max(step.duration ?? 10, 0.1), 60)
         const result = await ComputerDriver.call<{ met: boolean; via?: string; ms: number }>(
           "wait_for",
@@ -707,7 +986,11 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
         )
         const took = (result.ms / 1000).toFixed(1)
         if (!result.met)
-          throw new Error(`"${step.text}" ${step.gone ? "was still there" : "did not appear"} after ${seconds}s`)
+          throw fail(
+            "TIMEOUT",
+            `"${step.text}" ${step.gone ? "was still there" : "did not appear"} after ${seconds}s`,
+            "safe",
+          )
         return step.gone ? `"${step.text}" went away after ${took}s` : `found ${result.via} after ${took}s`
       }
       case "watch": {
@@ -752,7 +1035,7 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
         }
       }
       case "switch_window": {
-        if (!step.text) throw new Error("switch_window needs the window title or app name in text")
+        if (!step.text) throw fail("INVALID_ARGS", "switch_window needs the window title or app name in text", "no")
         await ask(["screen"], { action })
         const window = await ComputerDriver.call<WindowInfo & { front: boolean }>("switch", {
           query: step.text,
@@ -818,18 +1101,13 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
       case "type":
       case "key":
       case "hold_key": {
-        if (!step.text) throw new Error(`${action} needs text`)
+        if (!step.text) throw fail("INVALID_ARGS", `${action} needs text`, "no")
         if (step.ref !== undefined && background) {
           // Focus the field through accessibility rather than clicking it.
           const entry = entryFor(step.ref)
           if (entry.item.src !== "uia") throw noCursor(`${show(entry, display)} is text on screen, not a field`)
           await guard("type", await windowOf(entry))
-          const item = entry.item
-          await ComputerDriver.call(
-            "focus",
-            { hwnd: item.win, rid: item.rid, name: item.name, x: item.x + item.w / 2, y: item.y + item.h / 2 },
-            6_000,
-          )
+          await ComputerDriver.call("focus", located(entry.item), 6_000)
           await new Promise((resolve) => setTimeout(resolve, 60))
         } else if (step.ref !== undefined) {
           // Typing into an element clicks it first, so the keys go to that field and not to OpenCode.
@@ -854,7 +1132,7 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
         return `waited ${ms / 1000}s. Skip wait next time: actions already return their screenshot once the screen settles, and wait_for or watch return the moment something appears`
       }
       case "open_application": {
-        if (!step.text) throw new Error("open_application needs the app name in text")
+        if (!step.text) throw fail("INVALID_ARGS", "open_application needs the app name in text", "no")
         await ask([`open:${step.text.toLowerCase()}`], { action, app: step.text })
         const opened = await ComputerDriver.call<string>("open", { name: step.text })
         // The new app opens on top, so the next read should go to it rather than the previous app.
@@ -868,10 +1146,122 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
       case "write_clipboard": {
         await ask(["clipboard"], { action })
         await ComputerDriver.call("clipboard_set", { text: step.text ?? "" })
-        return "clipboard updated"
+        return step.text ? "clipboard updated" : "clipboard cleared"
+      }
+      case "inspect":
+      case "expand":
+      case "collapse":
+      case "select":
+      case "focus":
+      case "scroll_to": {
+        await ask(["screen"], { action })
+        if (step.ref === undefined && !step.text) throw fail("INVALID_ARGS", `${action} needs ref or text`, "no")
+        const entry =
+          step.ref !== undefined
+            ? entryFor(step.ref)
+            : await named(step.text!, display, index, (e) => e.item.src === "uia")
+        // Like click_element these go through accessibility, so the mouse stays where it is; inspect only reads.
+        const permit = async (window: WindowInfo | null) => {
+          if (action !== "inspect") await guard(action === "scroll_to" ? "scroll" : "left_click", window)
+        }
+        let label: string
+        let result: unknown
+        if (entry) {
+          if (entry.item.src !== "uia")
+            throw fail(
+              "UNSUPPORTED",
+              `${show(entry, display)} is text read from the screen, not a control; ${action} needs a control`,
+              "no",
+            )
+          await permit(await windowOf(entry))
+          label = show(entry, display)
+          result = await ComputerDriver.call(
+            action === "focus" ? "focus" : "element",
+            { ...located(entry.item), do: action },
+            10_000,
+          )
+        } else {
+          // Not on screen: scroll_to and inspect also reach a control scrolled out of view, by its exact name.
+          const hwnd = workingIn.get(ctx.sessionID)
+          if (!hwnd || (action !== "scroll_to" && action !== "inspect"))
+            throw fail("NOT_FOUND", `No control matching "${step.text}" on screen; take a screenshot`)
+          await permit(refs.windows.get(hwnd) ?? (await windowNamed(undefined)))
+          label = `"${step.text}"`
+          result = await ComputerDriver.call("element", { hwnd, name: step.text, any: true, do: action }, 10_000)
+        }
+        if (action === "inspect") return inspection(label, result as Inspected, display)
+        if (action === "focus") return `${result ? "focused" : "asked the app to focus"} ${label}`
+        if (typeof result === "object" && result && "mouse" in result) {
+          // A classic list only notices a selection made the way a person makes it: a click on the row.
+          if (entry && !background) return run({ ...step, action: "click_element", ref: entry.ref, text: undefined })
+          const forced = await ComputerDriver.call(
+            "element",
+            entry
+              ? { ...located(entry.item), do: action, force: true }
+              : { hwnd: workingIn.get(ctx.sessionID), name: step.text, any: true, do: action, force: true },
+            10_000,
+          )
+          return `${action} ${label} -> ${String(forced)} (through accessibility, so this older app may not react as to a click)`
+        }
+        return `${action} ${label} -> ${String(result)}`
+      }
+      case "list_windows": {
+        await ask(["screen"], { action })
+        const [list, all] = await Promise.all([
+          ComputerDriver.call<Placed[]>("windows", { skip: "opencode", pids: PIDS }),
+          screens(true),
+        ])
+        if (list.length === 0) return "No app windows are open"
+        const working = workingIn.get(ctx.sessionID)
+        return list
+          .map(
+            (window) =>
+              `- ${ComputerScreen.describeWindow(window)} ${window.state}${window.front ? " front" : ""}${window.hwnd === working ? " (working in)" : ""}${placeOf(window, all)}`,
+          )
+          .join("\n")
+      }
+      case "minimize_window":
+      case "maximize_window":
+      case "restore_window":
+      case "close_window":
+      case "move_window": {
+        await ask(["screen"], { action })
+        const window = await windowNamed(step.text)
+        await guard(action, window)
+        const name = ComputerScreen.describeWindow(window)
+        if (action === "close_window") {
+          const result = await ComputerDriver.call<{ closed: boolean }>("window", { hwnd: window.hwnd, do: "close" }, 8_000)
+          if (!result.closed)
+            return `asked ${name} to close; it is still open, most likely asking to save. Look at it before going on`
+          if (workingIn.get(ctx.sessionID) === window.hwnd) workingIn.delete(ctx.sessionID)
+          return `closed ${name}`
+        }
+        const verb = action.replace("_window", "")
+        let bounds = {}
+        if (action === "move_window") {
+          const region = step.region
+          if (region?.length === 4) {
+            const a = toPhysical(display, [region[0]!, region[1]!], "region")
+            const b = toPhysical(display, [region[2]!, region[3]!], "region")
+            bounds = {
+              x: Math.min(a.x, b.x),
+              y: Math.min(a.y, b.y),
+              width: Math.abs(b.x - a.x),
+              height: Math.abs(b.y - a.y),
+            }
+          } else if (step.coordinate) bounds = { ...toPhysical(display, step.coordinate), width: 0, height: 0 }
+          else
+            throw fail(
+              "INVALID_ARGS",
+              "move_window needs region [x0, y0, x1, y1] for its new bounds, or coordinate [x, y] for its new top-left corner",
+              "no",
+            )
+        }
+        const placed = await ComputerDriver.call<Placed>("window", { hwnd: window.hwnd, do: verb, ...bounds }, 8_000)
+        return `${verb}d ${name}: now ${placed.state}${placeOf(placed, await screens(true))}`
       }
     }
-    throw new Error(`Unknown action: ${String(action)}`)
+    throw fail("INVALID_ARGS", `Unknown action: ${String(action)}`, "no")
   }
 
   const steps: StepParams[] = [params, ...(params.actions ?? [])]
@@ -881,7 +1271,7 @@ export async function execute(params: Params, ctx: Context): Promise<Result> {
       if (ctx.aborted()) return "aborted"
       const result = await run(step).then(
         (text) => ({ text }),
-        (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+        (error: unknown) => ({ error: ComputerErrors.format(ComputerErrors.classify(error, step.action)) }),
       )
       if (rejection) return "rejected"
       // The step may have moved to another app (switch_window, open_application, a click in it).

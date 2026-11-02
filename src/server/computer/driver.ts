@@ -7,6 +7,7 @@ import path from "path"
 import HELPER from "./windows-helper.txt"
 import HOST from "./windows-host.txt"
 import SEE from "./windows-see.txt"
+import ACT from "./windows-act.txt"
 import OCR from "./windows-ocr.txt"
 import AURORA from "./windows-aurora.txt"
 
@@ -40,7 +41,10 @@ export type ScreenMap = {
   target: WindowInfo | null
   ocr: string
   ms: number
+  /** Named containers (panes, toolbars, lists, groups) with their rectangles, for read_window's skeleton. */
+  groups?: Group[]
 }
+export type Group = { win: number; name: string; x: number; y: number; w: number; h: number }
 
 const IDLE_MS = 5 * 60 * 1000
 const READY_MS = 30 * 1000
@@ -66,7 +70,7 @@ export async function tempDir() {
   return dir
 }
 
-const SOURCES = { "helper.ps1": HELPER, "host.cs": HOST, "see.cs": SEE, "ocr.cs": OCR, "aurora.cs": AURORA }
+const SOURCES = { "helper.ps1": HELPER, "host.cs": HOST, "see.cs": SEE, "act.cs": ACT, "ocr.cs": OCR, "aurora.cs": AURORA }
 
 // The folder is named after a hash of the sources, so the DLLs the helper compiles there are reused until the
 // code changes.

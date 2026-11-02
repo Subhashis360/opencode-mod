@@ -476,7 +476,7 @@ export async function run(step: StepParams, ctx: Context): Promise<string> {
   const entryFor = (ref: number) => {
     const entry = ctx.refs.get(ref)
     if (!entry || entry.item.win !== phone.win)
-      throw new Error(`There is no element [${ref}] on this phone; take a screenshot for current refs`)
+      throw new Error(`STALE_REF: There is no element [${ref}] on this phone; take a screenshot for current refs`)
     return entry
   }
   const label = (entry: Entry) =>
@@ -494,7 +494,7 @@ export async function run(step: StepParams, ctx: Context): Promise<string> {
       throw new Error(
         `"${query}" matches ${match.candidates.length} elements; pass ref to pick one:\n${match.candidates.slice(0, 8).map(label).join("\n")}`,
       )
-    throw new Error(`No element matching "${query}" on the phone; take a screenshot`)
+    throw new Error(`NOT_FOUND: No element matching "${query}" on the phone; take a screenshot`)
   }
   const pointOf = (ref: number | undefined, coordinate: readonly number[] | undefined, name = "coordinate") => {
     if (ref !== undefined) return center(entryFor(ref).item)
@@ -705,7 +705,7 @@ export async function run(step: StepParams, ctx: Context): Promise<string> {
     }
   }
   throw new Error(
-    `${action} is not available on a phone; use tap (left_click), swipe (left_click_drag), scroll, type and key`,
+    `UNSUPPORTED: ${action} is not available on a phone; use tap (left_click), swipe (left_click_drag), scroll, type and key`,
   )
 }
 
